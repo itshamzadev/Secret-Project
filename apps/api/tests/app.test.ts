@@ -1,0 +1,43 @@
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+
+import { createApp } from "../src/app.js";
+
+const app = createApp({
+  getHealthSnapshot: () => ({
+    status: "ok",
+    database: "connected",
+    redis: "connected",
+    uptime: 12.34,
+  }),
+});
+
+describe("API foundation", () => {
+  it("returns the health status", async () => {
+    const response = await request(app).get("/api/v1/health");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        status: "ok",
+        database: "connected",
+        redis: "connected",
+        uptime: 12.34,
+      },
+    });
+  });
+
+  it("returns a consistent error for an unknown API route", async () => {
+    const response = await request(app).get("/api/v1/does-not-exist");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({
+      success: false,
+      error: {
+        code: "ROUTE_NOT_FOUND",
+        message: "The requested route was not found.",
+      },
+    });
+  });
+});

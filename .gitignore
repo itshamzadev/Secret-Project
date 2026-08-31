@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Mobile application and native Android output
+apps/android/
+**/android/
+**/.expo/
+*.apk
+*.aab
+*.hbc
+
+# Build and test output
+dist/
+build/
+.cache/
+.turbo/
+.metro/
+.expo-export/
+coverage/
+.eslintcache
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime output
+logs/
+uploads/
+tmp/
+temp/
+*.log
+
+# Secrets, credentials, and certificates
+secrets/
+credentials/
+*.secret
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+
+# IDE files
+.idea/
+.vscode/
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local tooling
+*.tsbuildinfo

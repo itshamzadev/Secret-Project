@@ -1,0 +1,36 @@
+services:
+  mongodb:
+    image: mongo:8.3-noble
+    container_name: terqivo-connect-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - terqivo-connect-mongodb-data:/data/db
+    healthcheck:
+      test:
+        ["CMD-SHELL", 'mongosh --quiet --eval "db.adminCommand(''ping'').ok"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:8.10-alpine
+    container_name: terqivo-connect-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - terqivo-connect-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  terqivo-connect-mongodb-data:
+  terqivo-connect-redis-data:

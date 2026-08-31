@@ -1,0 +1,26 @@
+{
+  "name": "terqivo-connect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform Terqivo Connect workspace",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.18.0",
+    "pnpm": ">=11.24.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @terqivo/api dev",
+    "android:dev": "pnpm --filter @terqivo/android android:dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm --filter @terqivo/contracts typecheck && pnpm --filter @terqivo/api typecheck && pnpm --filter @terqivo/android typecheck",
+    "android:typecheck": "pnpm --filter @terqivo/android typecheck",
+    "lint": "pnpm --filter @terqivo/api lint && pnpm --filter @terqivo/android lint",
+    "android:lint": "pnpm --filter @terqivo/android lint",
+    "format": "pnpm --filter @terqivo/contracts format && pnpm --filter @terqivo/api format && pnpm --filter @terqivo/android format",
+    "test": "pnpm --filter @terqivo/api test && pnpm --filter @terqivo/android test",
+    "android:test": "pnpm --filter @terqivo/android test",
+    "infra:up": "docker compose -f infra/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.dev.yml logs -f"
+  }
+}
