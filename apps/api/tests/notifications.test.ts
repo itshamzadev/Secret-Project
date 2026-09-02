@@ -5,8 +5,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import {
   buildIncomingCallPushPayload,
+  buildMissedCallPushPayload,
   buildMessagePushPayload,
   invalidPushTokensFromResponse,
+  invalidPushTokensFromReceiptResponse,
+  pushReceiptErrorCodesFromResponse,
 } from "../src/modules/notifications/push.service.js";
 import { disablePushTokens } from "../src/modules/notifications/notification.service.js";
 import { PushDeviceModel } from "../src/modules/notifications/push-device.model.js";
@@ -70,7 +73,7 @@ describe("push notification devices and payloads", () => {
     expect(removed.body.data.removed).toBe(true);
   });
 
-  it("builds safe message and incoming-call notification metadata", () => {
+  it("builds safe message, incoming-call, and missed-call metadata", () => {
     const message = {
       id: "message-1",
       conversationId: "conversation-1",
@@ -106,6 +109,7 @@ describe("push notification devices and payloads", () => {
         type: "message",
         conversationId: "conversation-1",
         senderId: "alice-1",
+        messageId: "message-1",
       },
     });
     expect(callPush).toMatchObject({
@@ -114,6 +118,23 @@ describe("push notification devices and payloads", () => {
       channelId: "calls",
       priority: "high",
       data: { type: "incoming_call", callType: "video" },
+    });
+    const missedCallPush = buildMissedCallPushPayload(
+      "ExponentPushToken[test]",
+      {
+        _id: new Types.ObjectId("68b6f3000000000000000001"),
+        callerId: new Types.ObjectId("68b6f3000000000000000002"),
+        calleeId: new Types.ObjectId("68b6f3000000000000000003"),
+        type: "video",
+      },
+      { displayName: "Alice" },
+    );
+    expect(missedCallPush).toMatchObject({
+      title: "Missed video call",
+      body: "Alice",
+      channelId: "calls",
+      priority: "high",
+      data: { type: "missed_call", callType: "video" },
     });
   });
 
@@ -144,5 +165,35 @@ describe("push notification devices and payloads", () => {
       (await PushDeviceModel.findOne({ pushToken: invalidToken }).exec())
         ?.enabled,
     ).toBe(false);
+  });
+
+  it("maps Expo receipt errors to their registered devices", () => {
+    const invalid = invalidPushTokensFromReceiptResponse(
+      new Map([
+        ["ticket-1", "ExponentPushToken[valid]"],
+        ["ticket-2", "ExponentPushToken[invalid]"],
+      ]),
+      {
+        data: {
+          "ticket-1": { status: "ok" },
+          "ticket-2": {
+            status: "error",
+            details: { error: "DeviceNotRegistered" },
+          },
+        },
+      },
+    );
+
+    expect(invalid).toEqual(["ExponentPushToken[invalid]"]);
+    expect(
+      pushReceiptErrorCodesFromResponse({
+        data: {
+          "ticket-2": {
+            status: "error",
+            details: { error: "DeviceNotRegistered" },
+          },
+        },
+      }),
+    ).toEqual(["DeviceNotRegistered"]);
   });
 });

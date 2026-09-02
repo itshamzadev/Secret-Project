@@ -258,6 +258,7 @@ export interface MessageNotificationData {
   type: "message";
   conversationId: string;
   senderId: string;
+  messageId?: string;
 }
 
 export interface IncomingCallNotificationData {
@@ -267,8 +268,17 @@ export interface IncomingCallNotificationData {
   callType: CallType;
 }
 
+export interface MissedCallNotificationData {
+  type: "missed_call";
+  callId: string;
+  callerId: string;
+  callType: CallType;
+}
+
 export type PushNotificationData =
-  MessageNotificationData | IncomingCallNotificationData;
+  | MessageNotificationData
+  | IncomingCallNotificationData
+  | MissedCallNotificationData;
 
 export interface NotificationDeviceRegistrationData {
   device: PushDeviceDto;

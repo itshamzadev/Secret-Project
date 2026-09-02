@@ -81,6 +81,10 @@ const environmentSchema = z.object({
     .string()
     .url()
     .default("https://exp.host/--/api/v2/push/send"),
+  EXPO_PUSH_RECEIPTS_URL: z
+    .string()
+    .url()
+    .default("https://exp.host/--/api/v2/push/getReceipts"),
   EXPO_ACCESS_TOKEN: z.preprocess(
     (value) =>
       typeof value === "string" && value.trim() === "" ? undefined : value,

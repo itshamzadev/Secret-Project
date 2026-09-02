@@ -64,7 +64,10 @@ import {
   startCallTimeoutCoordinator,
 } from "../modules/calls/call-timeouts.js";
 import { toCallUserDto } from "../modules/calls/call.dto.js";
-import { dispatchIncomingCallNotification } from "../modules/notifications/push.service.js";
+import {
+  dispatchIncomingCallNotification,
+  dispatchMissedCallNotification,
+} from "../modules/notifications/push.service.js";
 
 export interface SocketRuntime {
   io: Server;
@@ -599,6 +602,7 @@ export async function createSocketServer(
   await recoverCallTimeouts();
   const callTimeoutCoordinator = startCallTimeoutCoordinator(async (call) => {
     broadcastCall(io, "call:missed", callSignal(call));
+    await dispatchMissedCallNotification(call);
   });
 
   io.on("connection", (socket) => {

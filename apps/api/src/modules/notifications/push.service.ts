@@ -21,6 +21,17 @@ interface ExpoPushMessage {
   channelId: "messages" | "calls";
 }
 
+interface ExpoPushTicket {
+  status: "ok" | "error";
+  id?: string;
+  details?: Record<string, unknown>;
+}
+
+interface TicketTokenPair {
+  id: string;
+  token: string;
+}
+
 interface MessagePushInput {
   message: MessageDto;
   recipientId: string;
@@ -34,6 +45,8 @@ interface MessagePayloadInput {
 
 const pushDeduplicationTtlSeconds = 86_400;
 const expoBatchSize = 100;
+const expoRequestTimeoutMs = 10_000;
+const expoReceiptDelayMs = 15_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -57,11 +70,51 @@ export function buildMessagePushPayload(
       type: "message",
       conversationId: input.message.conversationId,
       senderId: input.message.senderId,
+      messageId: input.message.id,
     },
     sound: "default",
     priority: "high",
     channelId: "messages",
   };
+}
+
+export function buildMissedCallPushPayload(
+  token: string,
+  call: Pick<CallDocument, "_id" | "type" | "callerId" | "calleeId">,
+  caller: Pick<UserDocument, "displayName">,
+): ExpoPushMessage {
+  const callType: CallType = call.type;
+  return {
+    to: token,
+    title: `Missed ${callType} call`,
+    body: caller.displayName,
+    data: {
+      type: "missed_call",
+      callId: call._id.toString(),
+      callerId: call.callerId.toString(),
+      callType,
+    },
+    sound: "default",
+    priority: "high",
+    channelId: "calls",
+  };
+}
+
+function pushErrorCode(value: unknown): string | null {
+  if (!isRecord(value) || value.status !== "error") return null;
+  const details = isRecord(value.details) ? value.details : undefined;
+  return typeof details?.error === "string" ? details.error : null;
+}
+
+export function pushErrorCodesFromResponse(response: unknown): string[] {
+  if (!isRecord(response) || !Array.isArray(response.data)) return [];
+  return [
+    ...new Set(
+      response.data
+        .map((ticket: unknown) => pushErrorCode(ticket))
+        .filter((code): code is string => code !== null),
+    ),
+  ];
 }
 
 export function buildIncomingCallPushPayload(
@@ -92,13 +145,55 @@ export function invalidPushTokensFromResponse(
 ): string[] {
   if (!isRecord(response) || !Array.isArray(response.data)) return [];
   return response.data.flatMap((ticket: unknown, index: number) => {
-    if (!isRecord(ticket) || ticket.status !== "error") return [];
-    const details = isRecord(ticket.details) ? ticket.details : undefined;
-    return details?.error === "DeviceNotRegistered" &&
+    return pushErrorCode(ticket) === "DeviceNotRegistered" &&
       tokens[index] !== undefined
       ? [tokens[index]]
       : [];
   });
+}
+
+function ticketTokenPairsFromResponse(
+  tokens: string[],
+  response: unknown,
+): TicketTokenPair[] {
+  if (!isRecord(response) || !Array.isArray(response.data)) return [];
+  return response.data.flatMap((ticket: unknown, index: number) => {
+    if (!isRecord(ticket) || typeof ticket.id !== "string") return [];
+    const token = tokens[index];
+    if (token === undefined || ticket.status !== "ok") return [];
+    const parsedTicket: ExpoPushTicket = {
+      status: "ok",
+      id: ticket.id,
+    };
+    return parsedTicket.id === undefined
+      ? []
+      : [{ id: parsedTicket.id, token }];
+  });
+}
+
+export function invalidPushTokensFromReceiptResponse(
+  ticketTokens: ReadonlyMap<string, string>,
+  response: unknown,
+): string[] {
+  if (!isRecord(response) || !isRecord(response.data)) return [];
+  return Object.entries(response.data).flatMap(([ticketId, receipt]) => {
+    const token = ticketTokens.get(ticketId);
+    return pushErrorCode(receipt) === "DeviceNotRegistered" &&
+      token !== undefined
+      ? [token]
+      : [];
+  });
+}
+
+export function pushReceiptErrorCodesFromResponse(response: unknown): string[] {
+  if (!isRecord(response) || !isRecord(response.data)) return [];
+  return [
+    ...new Set(
+      Object.values(response.data)
+        .map((receipt: unknown) => pushErrorCode(receipt))
+        .filter((code): code is string => code !== null),
+    ),
+  ];
 }
 
 async function claimPush(key: string): Promise<boolean> {
@@ -110,34 +205,100 @@ async function claimPush(key: string): Promise<boolean> {
   return result === "OK";
 }
 
-async function sendExpoBatch(messages: ExpoPushMessage[]): Promise<void> {
-  if (messages.length === 0) return;
+async function releasePushClaim(key: string): Promise<void> {
+  if (redisClient.isReady) await redisClient.del(key);
+}
+
+async function runPushOnce(
+  key: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  if (!(await claimPush(key))) return;
+  try {
+    await operation();
+  } catch (error: unknown) {
+    await releasePushClaim(key).catch(() => undefined);
+    throw error;
+  }
+}
+
+function pushHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (env.EXPO_ACCESS_TOKEN !== undefined) {
     headers.Authorization = `Bearer ${env.EXPO_ACCESS_TOKEN}`;
   }
+  return headers;
+}
+
+async function responseBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function processExpoReceipts(
+  ticketTokens: TicketTokenPair[],
+): Promise<void> {
+  if (ticketTokens.length === 0) return;
+  const response = await fetch(env.EXPO_PUSH_RECEIPTS_URL, {
+    method: "POST",
+    headers: pushHeaders(),
+    body: JSON.stringify({ ids: ticketTokens.map((ticket) => ticket.id) }),
+    signal: AbortSignal.timeout(expoRequestTimeoutMs),
+  });
+  const body = await responseBody(response);
+  if (!response.ok) {
+    logger.warn(
+      { statusCode: response.status },
+      "Expo push receipt request failed",
+    );
+    return;
+  }
+  const ticketMap = new Map(
+    ticketTokens.map((ticket) => [ticket.id, ticket.token]),
+  );
+  await disablePushTokens(
+    invalidPushTokensFromReceiptResponse(ticketMap, body),
+  );
+  const errorCodes = pushReceiptErrorCodesFromResponse(body);
+  if (errorCodes.length > 0) {
+    logger.warn({ errorCodes }, "Expo push receipts reported delivery errors");
+  }
+}
+
+function scheduleExpoReceiptCheck(ticketTokens: TicketTokenPair[]): void {
+  if (ticketTokens.length === 0) return;
+  const timer = setTimeout(() => {
+    void processExpoReceipts(ticketTokens).catch((error: unknown) => {
+      logger.warn({ err: error }, "Expo push receipt processing failed");
+    });
+  }, expoReceiptDelayMs);
+  timer.unref();
+}
+
+async function sendExpoBatch(messages: ExpoPushMessage[]): Promise<void> {
+  if (messages.length === 0) return;
   const response = await fetch(env.EXPO_PUSH_API_URL, {
     method: "POST",
-    headers,
+    headers: pushHeaders(),
     body: JSON.stringify(messages),
+    signal: AbortSignal.timeout(expoRequestTimeoutMs),
   });
-  let responseBody: unknown = null;
-  try {
-    responseBody = await response.json();
-  } catch {
-    // The status still determines whether this delivery attempt succeeded.
-  }
+  const body = await responseBody(response);
   if (!response.ok) {
     throw new Error(`Expo push service returned HTTP ${response.status}.`);
   }
-  await disablePushTokens(
-    invalidPushTokensFromResponse(
-      deviceTokensFromMessages(messages),
-      responseBody,
-    ),
-  );
+  const tokens = deviceTokensFromMessages(messages);
+  await disablePushTokens(invalidPushTokensFromResponse(tokens, body));
+  const errorCodes = pushErrorCodesFromResponse(body);
+  if (errorCodes.length > 0) {
+    logger.warn({ errorCodes }, "Expo push tickets reported delivery errors");
+  }
+  scheduleExpoReceiptCheck(ticketTokenPairsFromResponse(tokens, body));
 }
 
 function deviceTokensFromMessages(messages: ExpoPushMessage[]): string[] {
@@ -153,21 +314,23 @@ async function sendPushMessages(messages: ExpoPushMessage[]): Promise<void> {
 export async function dispatchNewDirectMessage(
   input: MessagePushInput,
 ): Promise<void> {
+  const deduplicationKey = `terqivo:push:message:${input.message.id}`;
   try {
-    if (!(await claimPush(`terqivo:push:message:${input.message.id}`))) return;
-    const [devices, sender] = await Promise.all([
-      getEnabledPushDevices(input.recipientId),
-      getUserById(input.senderId),
-    ]);
-    if (sender === null) return;
-    await sendPushMessages(
-      devices.map((device) =>
-        buildMessagePushPayload(device.pushToken, {
-          message: input.message,
-          sender,
-        }),
-      ),
-    );
+    await runPushOnce(deduplicationKey, async () => {
+      const [devices, sender] = await Promise.all([
+        getEnabledPushDevices(input.recipientId),
+        getUserById(input.senderId),
+      ]);
+      if (sender === null) return;
+      await sendPushMessages(
+        devices.map((device) =>
+          buildMessagePushPayload(device.pushToken, {
+            message: input.message,
+            sender,
+          }),
+        ),
+      );
+    });
   } catch (error: unknown) {
     logger.warn({ err: error }, "Direct message push delivery failed");
   }
@@ -177,15 +340,39 @@ export async function dispatchIncomingCallNotification(
   call: CallDocument,
   caller: UserDocument,
 ): Promise<void> {
+  const deduplicationKey = `terqivo:push:call:${call._id.toString()}`;
   try {
-    if (!(await claimPush(`terqivo:push:call:${call._id.toString()}`))) return;
-    const devices = await getEnabledPushDevices(call.calleeId.toString());
-    await sendPushMessages(
-      devices.map((device) =>
-        buildIncomingCallPushPayload(device.pushToken, call, caller),
-      ),
-    );
+    await runPushOnce(deduplicationKey, async () => {
+      const devices = await getEnabledPushDevices(call.calleeId.toString());
+      await sendPushMessages(
+        devices.map((device) =>
+          buildIncomingCallPushPayload(device.pushToken, call, caller),
+        ),
+      );
+    });
   } catch (error: unknown) {
     logger.warn({ err: error }, "Incoming call push delivery failed");
+  }
+}
+
+export async function dispatchMissedCallNotification(
+  call: CallDocument,
+): Promise<void> {
+  const deduplicationKey = `terqivo:push:missed-call:${call._id.toString()}`;
+  try {
+    await runPushOnce(deduplicationKey, async () => {
+      const [devices, caller] = await Promise.all([
+        getEnabledPushDevices(call.calleeId.toString()),
+        getUserById(call.callerId.toString()),
+      ]);
+      if (caller === null) return;
+      await sendPushMessages(
+        devices.map((device) =>
+          buildMissedCallPushPayload(device.pushToken, call, caller),
+        ),
+      );
+    });
+  } catch (error: unknown) {
+    logger.warn({ err: error }, "Missed call push delivery failed");
   }
 }
