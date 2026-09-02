@@ -8,7 +8,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 
-RUN pnpm install --frozen-lockfile --prod=false
+# Install only the API and its workspace dependency graph. The root package also
+# contains Android tooling, which is not part of the backend production image.
+RUN pnpm install --filter @terqivo/api... --frozen-lockfile --prod=false
 
 COPY apps/api ./apps/api
 COPY packages/contracts ./packages/contracts

@@ -32,6 +32,20 @@ interface TicketTokenPair {
   token: string;
 }
 
+interface PushTicketSummary {
+  ticketCount: number;
+  okTicketCount: number;
+  ticketIdCount: number;
+  errorCodes: string[];
+}
+
+interface PushReceiptSummary {
+  receiptCount: number;
+  okReceiptCount: number;
+  errorReceiptCount: number;
+  errorCodes: string[];
+}
+
 interface MessagePushInput {
   message: MessageDto;
   recipientId: string;
@@ -115,6 +129,51 @@ export function pushErrorCodesFromResponse(response: unknown): string[] {
         .filter((code): code is string => code !== null),
     ),
   ];
+}
+
+function pushTicketSummary(response: unknown): PushTicketSummary {
+  if (!isRecord(response) || !Array.isArray(response.data)) {
+    return {
+      ticketCount: 0,
+      okTicketCount: 0,
+      ticketIdCount: 0,
+      errorCodes: [],
+    };
+  }
+
+  return {
+    ticketCount: response.data.length,
+    okTicketCount: response.data.filter(
+      (ticket: unknown) => isRecord(ticket) && ticket.status === "ok",
+    ).length,
+    ticketIdCount: response.data.filter(
+      (ticket: unknown) => isRecord(ticket) && typeof ticket.id === "string",
+    ).length,
+    errorCodes: pushErrorCodesFromResponse(response),
+  };
+}
+
+function pushReceiptSummary(response: unknown): PushReceiptSummary {
+  if (!isRecord(response) || !isRecord(response.data)) {
+    return {
+      receiptCount: 0,
+      okReceiptCount: 0,
+      errorReceiptCount: 0,
+      errorCodes: [],
+    };
+  }
+
+  const receipts = Object.values(response.data);
+  return {
+    receiptCount: receipts.length,
+    okReceiptCount: receipts.filter(
+      (receipt: unknown) => isRecord(receipt) && receipt.status === "ok",
+    ).length,
+    errorReceiptCount: receipts.filter(
+      (receipt: unknown) => isRecord(receipt) && receipt.status === "error",
+    ).length,
+    errorCodes: pushReceiptErrorCodesFromResponse(response),
+  };
 }
 
 export function buildIncomingCallPushPayload(
@@ -212,10 +271,11 @@ async function releasePushClaim(key: string): Promise<void> {
 async function runPushOnce(
   key: string,
   operation: () => Promise<void>,
-): Promise<void> {
-  if (!(await claimPush(key))) return;
+): Promise<boolean> {
+  if (!(await claimPush(key))) return false;
   try {
     await operation();
+    return true;
   } catch (error: unknown) {
     await releasePushClaim(key).catch(() => undefined);
     throw error;
@@ -251,6 +311,16 @@ async function processExpoReceipts(
     signal: AbortSignal.timeout(expoRequestTimeoutMs),
   });
   const body = await responseBody(response);
+  const summary = pushReceiptSummary(body);
+  logger.info(
+    {
+      event: "push.expo_receipt_response",
+      httpStatus: response.status,
+      requestAccepted: response.ok,
+      ...summary,
+    },
+    "Expo push receipt response",
+  );
   if (!response.ok) {
     logger.warn(
       { statusCode: response.status },
@@ -289,6 +359,17 @@ async function sendExpoBatch(messages: ExpoPushMessage[]): Promise<void> {
     signal: AbortSignal.timeout(expoRequestTimeoutMs),
   });
   const body = await responseBody(response);
+  const summary = pushTicketSummary(body);
+  logger.info(
+    {
+      event: "push.expo_ticket_response",
+      httpStatus: response.status,
+      requestAccepted: response.ok,
+      attemptedDeviceCount: messages.length,
+      ...summary,
+    },
+    "Expo push ticket response",
+  );
   if (!response.ok) {
     throw new Error(`Expo push service returned HTTP ${response.status}.`);
   }
@@ -316,11 +397,20 @@ export async function dispatchNewDirectMessage(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:message:${input.message.id}`;
   try {
-    await runPushOnce(deduplicationKey, async () => {
+    const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       const [devices, sender] = await Promise.all([
         getEnabledPushDevices(input.recipientId),
         getUserById(input.senderId),
       ]);
+      logger.info(
+        {
+          event: "push.message_requested",
+          recipientId: input.recipientId,
+          activeDeviceCount: devices.length,
+          dedupAccepted: true,
+        },
+        "Direct message push requested",
+      );
       if (sender === null) return;
       await sendPushMessages(
         devices.map((device) =>
@@ -331,6 +421,12 @@ export async function dispatchNewDirectMessage(
         ),
       );
     });
+    if (!dedupAccepted) {
+      logger.info(
+        { event: "push.message_skipped", dedupAccepted: false },
+        "Direct message push skipped as duplicate",
+      );
+    }
   } catch (error: unknown) {
     logger.warn({ err: error }, "Direct message push delivery failed");
   }
@@ -342,14 +438,30 @@ export async function dispatchIncomingCallNotification(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:call:${call._id.toString()}`;
   try {
-    await runPushOnce(deduplicationKey, async () => {
+    const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       const devices = await getEnabledPushDevices(call.calleeId.toString());
+      logger.info(
+        {
+          event: "push.incoming_call_requested",
+          callId: call._id.toString(),
+          recipientId: call.calleeId.toString(),
+          activeDeviceCount: devices.length,
+          dedupAccepted: true,
+        },
+        "Incoming call push requested",
+      );
       await sendPushMessages(
         devices.map((device) =>
           buildIncomingCallPushPayload(device.pushToken, call, caller),
         ),
       );
     });
+    if (!dedupAccepted) {
+      logger.info(
+        { event: "push.incoming_call_skipped", dedupAccepted: false },
+        "Incoming call push skipped as duplicate",
+      );
+    }
   } catch (error: unknown) {
     logger.warn({ err: error }, "Incoming call push delivery failed");
   }
@@ -360,11 +472,21 @@ export async function dispatchMissedCallNotification(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:missed-call:${call._id.toString()}`;
   try {
-    await runPushOnce(deduplicationKey, async () => {
+    const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       const [devices, caller] = await Promise.all([
         getEnabledPushDevices(call.calleeId.toString()),
         getUserById(call.callerId.toString()),
       ]);
+      logger.info(
+        {
+          event: "push.missed_call_requested",
+          callId: call._id.toString(),
+          recipientId: call.calleeId.toString(),
+          activeDeviceCount: devices.length,
+          dedupAccepted: true,
+        },
+        "Missed call push requested",
+      );
       if (caller === null) return;
       await sendPushMessages(
         devices.map((device) =>
@@ -372,6 +494,12 @@ export async function dispatchMissedCallNotification(
         ),
       );
     });
+    if (!dedupAccepted) {
+      logger.info(
+        { event: "push.missed_call_skipped", dedupAccepted: false },
+        "Missed call push skipped as duplicate",
+      );
+    }
   } catch (error: unknown) {
     logger.warn({ err: error }, "Missed call push delivery failed");
   }
