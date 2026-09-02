@@ -242,6 +242,42 @@ export interface CallHistoryData {
   nextCursor: string | null;
 }
 
+export const pushPlatforms = ["android"] as const;
+export type PushPlatform = (typeof pushPlatforms)[number];
+
+export interface PushDeviceDto {
+  id: string;
+  platform: PushPlatform;
+  deviceId: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageNotificationData {
+  type: "message";
+  conversationId: string;
+  senderId: string;
+}
+
+export interface IncomingCallNotificationData {
+  type: "incoming_call";
+  callId: string;
+  callerId: string;
+  callType: CallType;
+}
+
+export type PushNotificationData =
+  MessageNotificationData | IncomingCallNotificationData;
+
+export interface NotificationDeviceRegistrationData {
+  device: PushDeviceDto;
+}
+
+export interface NotificationDeviceRemovalData {
+  removed: boolean;
+}
+
 export interface CallActionData {
   call: CallSignalDto;
   changed: boolean;

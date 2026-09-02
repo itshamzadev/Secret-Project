@@ -11,6 +11,7 @@ import { initializeConversationModels } from "./modules/conversations/conversati
 import { initializeMessageModels } from "./modules/messages/message.service.js";
 import { initializePresenceModels } from "./modules/users/presence.service.js";
 import { initializeCallModels } from "./modules/calls/call.service.js";
+import { initializeNotificationModels } from "./modules/notifications/notification.service.js";
 import { createSocketServer, type SocketRuntime } from "./sockets/index.js";
 
 const app = createApp();
@@ -66,6 +67,7 @@ export async function startServer(): Promise<void> {
     await initializeMessageModels();
     await initializePresenceModels();
     await initializeCallModels();
+    await initializeNotificationModels();
     socketRuntime = await createSocketServer(httpServer);
 
     await new Promise<void>((resolve, reject) => {

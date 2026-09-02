@@ -4,8 +4,8 @@ Terqivo Connect is a cross-platform communication and social application. This r
 
 ## Architecture
 
-- `apps/api`: TypeScript + Express API, Socket.IO server, MongoDB/Mongoose integration, Redis integration, validation, logging, middleware, health endpoints, users/authentication/session management, contacts, direct conversations, messages, receipts, and presence.
-- `apps/android`: Expo development-client Android application using Expo Router, TanStack Query, Zustand, Axios, Socket.IO Client, React Hook Form, Zod, and SecureStore. It currently contains authentication, contacts, direct chats, text messaging, receipts, typing, and presence UI.
+- `apps/api`: TypeScript + Express API, Socket.IO server, MongoDB/Mongoose integration, Redis integration, validation, logging, middleware, health endpoints, users/authentication/session management, contacts, direct conversations, messages, receipts, presence, calls, and push-device registration/delivery.
+- `apps/android`: Expo development-client Android application using Expo Router, TanStack Query, Zustand, Axios, Socket.IO Client, React Hook Form, Zod, SecureStore, and Expo Notifications. It currently contains authentication, contacts, direct chats, text messaging, receipts, typing, presence, calls, and notification routing UI.
 - `packages/contracts`: Shared API contract package for types, DTOs, enums, and validation schemas. It contains no backend business logic.
 - `infra`: Local Docker Compose infrastructure for MongoDB and Redis.
 - `docs`: Reserved for architecture and operational documentation.
@@ -72,10 +72,12 @@ Create the public client configuration from its example:
 Copy-Item apps/android/.env.example apps/android/.env
 ```
 
-The default Android emulator URLs use `10.0.2.2` to reach the host machine's
-`localhost:5000` API. For a physical device, set both values to the computer's
-LAN IP, for example `http://192.168.1.20:5000/api/v1` and
-`http://192.168.1.20:5000`.
+The checked-in example targets the current HTTP deployment. For local
+development, replace both URLs with the API origin reachable by the device,
+for example `http://10.0.2.2:5000/api/v1` and `http://10.0.2.2:5000` in an
+Android emulator, or the computer's LAN IP on a physical phone. The temporary
+`EXPO_PUBLIC_ALLOW_CLEARTEXT_HTTP=true` setting is only for HTTP testing and
+must be removed after HTTPS is enabled.
 
 Start the development client bundler with:
 
@@ -105,7 +107,8 @@ pnpm android:test
 Client routes currently include `(auth)/login`, `(auth)/register`,
 `(app)/chats`, `(app)/contacts`, `(app)/profile`, and
 `chat/[conversationId]`, `(app)/calls`, and `call/[callId]`. Chats and direct
-messages remain fully active; calls now use the real backend signaling flow.
+messages remain fully active; calls now use the real backend signaling flow and
+video uses the same local WebRTC stream for the tap-to-swap self preview.
 Groups, channels, stories, media, videos, and AI remain intentionally locked
 future areas.
 
@@ -253,6 +256,36 @@ Reliable calls while the app is killed require future FCM wake-up and Android
 telecom/foreground-service integration.
 
 Tests use the dedicated `terqivo_connect_test` database name and explicitly guard against non-test configuration. They do not drop the normal local database.
+
+## Push notifications
+
+The Android client uses `expo-notifications` in a native development/release
+build, creates separate Messages and Calls channels, requests Android 13+
+notification permission once after authentication, and registers its Expo push
+token with the authenticated API at `POST /api/v1/notifications/devices`.
+The token is removed on logout when the server is reachable. Tokens are never
+returned in API responses or logged.
+
+The API sends a message push to every enabled device owned by the recipient and
+sends an incoming-call push to every enabled callee device. Redis prevents
+duplicate delivery attempts for the same message or call. Expo's
+`DeviceNotRegistered` ticket response disables the affected token. Foreground
+message banners are suppressed only while the exact conversation is open;
+Socket.IO remains the realtime transport.
+
+Notification data contains only a message conversation/sender reference or an
+incoming-call reference. The Android root layout queues notification taps until
+authentication restoration completes, then routes to the conversation or
+validates the still-ringing call before opening its call screen. Expired,
+cancelled, or already-answered call notifications are ignored.
+
+Remote delivery requires external project configuration that is intentionally
+not committed: link the app to an Expo/EAS project, provide its project ID
+through `EXPO_PUBLIC_EXPO_PROJECT_ID` or EAS app metadata, configure Android FCM
+credentials in EAS, and build a native development/release APK. If the API is
+configured to use authenticated Expo Push Service requests, set
+`EXPO_ACCESS_TOKEN` only in the server environment. Expo Go on Android cannot
+be used to validate remote push notifications for SDK 57.
 
 ## Quality commands
 

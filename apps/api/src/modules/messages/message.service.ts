@@ -11,6 +11,7 @@ import {
 } from "../conversations/conversation.service.js";
 import { ConversationModel } from "../conversations/conversation.model.js";
 import type { ConversationDocument } from "../conversations/conversation.types.js";
+import { dispatchNewDirectMessage } from "../notifications/push.service.js";
 import { toMessageDto } from "./message.dto.js";
 import { MessageModel } from "./message.model.js";
 import type {
@@ -144,6 +145,12 @@ export async function sendTextMessage(
     context,
     conversationId,
   );
+
+  void dispatchNewDirectMessage({
+    message: toMessageDto(message, currentConversation, context.userId),
+    recipientId: recipientId.toString(),
+    senderId: context.userId,
+  });
 
   return {
     message: toMessageDto(message, currentConversation, context.userId),

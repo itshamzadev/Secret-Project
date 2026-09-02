@@ -64,6 +64,7 @@ import {
   startCallTimeoutCoordinator,
 } from "../modules/calls/call-timeouts.js";
 import { toCallUserDto } from "../modules/calls/call.dto.js";
+import { dispatchIncomingCallNotification } from "../modules/notifications/push.service.js";
 
 export interface SocketRuntime {
   io: Server;
@@ -196,6 +197,7 @@ function installCallEvents(io: Server, socket: Socket): void {
           "call:incoming",
           incoming,
         );
+        void dispatchIncomingCallNotification(result.call, result.caller);
         await scheduleCallTimeout(
           result.call._id.toString(),
           result.call.initiatedAt,

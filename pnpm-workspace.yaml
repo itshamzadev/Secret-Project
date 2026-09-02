@@ -1,9 +1,11 @@
-﻿packages:
+packages:
   - apps/*
   - packages/*
 allowBuilds:
   argon2: true
   esbuild: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - expo-constants@57.0.17
+  - expo-notifications@57.0.16
 nodeLinker: hoisted
-

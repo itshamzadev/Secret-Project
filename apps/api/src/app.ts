@@ -20,6 +20,7 @@ import { createConversationRouter } from "./modules/conversations/conversation.r
 import { createMessageRouter } from "./modules/messages/message.routes.js";
 import { createUserRouter } from "./modules/users/user.routes.js";
 import { createCallRouter } from "./modules/calls/call.routes.js";
+import { createNotificationRouter } from "./modules/notifications/notification.routes.js";
 
 export interface CreateAppOptions {
   getHealthSnapshot?: HealthSnapshotProvider;
@@ -84,6 +85,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/conversations", createMessageRouter());
   apiV1Router.use("/users", createUserRouter());
   apiV1Router.use("/calls", createCallRouter());
+  apiV1Router.use("/notifications", createNotificationRouter());
   app.use("/api/v1", apiV1Router);
 
   app.use(notFoundHandler);

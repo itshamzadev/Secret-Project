@@ -17,6 +17,8 @@ import { UserPresenceSessionModel } from "../src/modules/users/user-presence-ses
 import { CallModel } from "../src/modules/calls/call.model.js";
 import { initializeCallModels } from "../src/modules/calls/call.service.js";
 import { callTimeoutKeys } from "../src/modules/calls/call-timeouts.js";
+import { PushDeviceModel } from "../src/modules/notifications/push-device.model.js";
+import { initializeNotificationModels } from "../src/modules/notifications/notification.service.js";
 
 export interface TestRegisterPayload {
   username: string;
@@ -81,6 +83,7 @@ export async function connectTestData(): Promise<void> {
   await initializeMessageModels();
   await initializePresenceModels();
   await initializeCallModels();
+  await initializeNotificationModels();
 }
 
 export async function clearTestData(): Promise<void> {
@@ -91,6 +94,7 @@ export async function clearTestData(): Promise<void> {
     AuthSessionModel.deleteMany({}),
     UserPresenceSessionModel.deleteMany({}),
     CallModel.deleteMany({}),
+    PushDeviceModel.deleteMany({}),
     UserModel.deleteMany({}),
   ]);
   if (redisClient.isReady) {

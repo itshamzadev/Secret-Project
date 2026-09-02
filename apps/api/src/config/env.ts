@@ -77,6 +77,15 @@ const environmentSchema = z.object({
     .min(300)
     .max(86400)
     .default(14400),
+  EXPO_PUSH_API_URL: z
+    .string()
+    .url()
+    .default("https://exp.host/--/api/v2/push/send"),
+  EXPO_ACCESS_TOKEN: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).optional(),
+  ),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
