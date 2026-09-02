@@ -46,6 +46,29 @@ interface PushReceiptSummary {
   errorCodes: string[];
 }
 
+export interface PushDiagnosticResult {
+  activeDeviceCount: number;
+  expoTicketStatus: "ok" | "error" | "partial" | "not_sent";
+  ticketIdPresent: boolean;
+  expoReceiptStatus: "ok" | "error" | "not_checked";
+  receiptErrorCode: string | null;
+}
+
+interface PushReceiptResult {
+  status: "ok" | "error";
+  summary: PushReceiptSummary;
+}
+
+interface ExpoBatchResult {
+  ticketSummary: PushTicketSummary;
+  receipt: PushReceiptResult | null;
+}
+
+interface ExpoBatchOptions {
+  waitForReceipt?: boolean;
+  receiptDelayMs?: number;
+}
+
 interface MessagePushInput {
   message: MessageDto;
   recipientId: string;
@@ -176,6 +199,33 @@ function pushReceiptSummary(response: unknown): PushReceiptSummary {
   };
 }
 
+function emptyPushTicketSummary(): PushTicketSummary {
+  return {
+    ticketCount: 0,
+    okTicketCount: 0,
+    ticketIdCount: 0,
+    errorCodes: [],
+  };
+}
+
+function emptyPushReceiptSummary(): PushReceiptSummary {
+  return {
+    receiptCount: 0,
+    okReceiptCount: 0,
+    errorReceiptCount: 0,
+    errorCodes: [],
+  };
+}
+
+function ticketStatus(
+  summary: PushTicketSummary,
+): PushDiagnosticResult["expoTicketStatus"] {
+  if (summary.ticketCount === 0) return "error";
+  if (summary.okTicketCount === summary.ticketCount) return "ok";
+  if (summary.okTicketCount === 0) return "error";
+  return "partial";
+}
+
 export function buildIncomingCallPushPayload(
   token: string,
   call: Pick<CallDocument, "_id" | "type" | "callerId" | "calleeId">,
@@ -302,56 +352,76 @@ async function responseBody(response: Response): Promise<unknown> {
 
 async function processExpoReceipts(
   ticketTokens: TicketTokenPair[],
-): Promise<void> {
-  if (ticketTokens.length === 0) return;
-  const response = await fetch(env.EXPO_PUSH_RECEIPTS_URL, {
-    method: "POST",
-    headers: pushHeaders(),
-    body: JSON.stringify({ ids: ticketTokens.map((ticket) => ticket.id) }),
-    signal: AbortSignal.timeout(expoRequestTimeoutMs),
-  });
-  const body = await responseBody(response);
-  const summary = pushReceiptSummary(body);
-  logger.info(
-    {
-      event: "push.expo_receipt_response",
-      httpStatus: response.status,
-      requestAccepted: response.ok,
-      ...summary,
-    },
-    "Expo push receipt response",
-  );
-  if (!response.ok) {
-    logger.warn(
-      { statusCode: response.status },
-      "Expo push receipt request failed",
-    );
-    return;
+): Promise<PushReceiptResult> {
+  if (ticketTokens.length === 0) {
+    return { status: "error", summary: emptyPushReceiptSummary() };
   }
-  const ticketMap = new Map(
-    ticketTokens.map((ticket) => [ticket.id, ticket.token]),
-  );
-  await disablePushTokens(
-    invalidPushTokensFromReceiptResponse(ticketMap, body),
-  );
-  const errorCodes = pushReceiptErrorCodesFromResponse(body);
-  if (errorCodes.length > 0) {
-    logger.warn({ errorCodes }, "Expo push receipts reported delivery errors");
+
+  try {
+    const response = await fetch(env.EXPO_PUSH_RECEIPTS_URL, {
+      method: "POST",
+      headers: pushHeaders(),
+      body: JSON.stringify({ ids: ticketTokens.map((ticket) => ticket.id) }),
+      signal: AbortSignal.timeout(expoRequestTimeoutMs),
+    });
+    const body = await responseBody(response);
+    const summary = pushReceiptSummary(body);
+    logger.info(
+      {
+        event: "push.expo_receipt_response",
+        httpStatus: response.status,
+        requestAccepted: response.ok,
+        ...summary,
+      },
+      "Expo push receipt response",
+    );
+    if (!response.ok) {
+      logger.warn(
+        { statusCode: response.status },
+        "Expo push receipt request failed",
+      );
+      return { status: "error", summary };
+    }
+
+    const ticketMap = new Map(
+      ticketTokens.map((ticket) => [ticket.id, ticket.token]),
+    );
+    await disablePushTokens(
+      invalidPushTokensFromReceiptResponse(ticketMap, body),
+    );
+    const errorCodes = pushReceiptErrorCodesFromResponse(body);
+    if (errorCodes.length > 0) {
+      logger.warn(
+        { errorCodes },
+        "Expo push receipts reported delivery errors",
+      );
+    }
+
+    const completeSuccess =
+      summary.receiptCount === ticketTokens.length &&
+      summary.okReceiptCount === summary.receiptCount;
+    return { status: completeSuccess ? "ok" : "error", summary };
+  } catch (error: unknown) {
+    logger.warn({ err: error }, "Expo push receipt processing failed");
+    return { status: "error", summary: emptyPushReceiptSummary() };
   }
 }
 
 function scheduleExpoReceiptCheck(ticketTokens: TicketTokenPair[]): void {
   if (ticketTokens.length === 0) return;
   const timer = setTimeout(() => {
-    void processExpoReceipts(ticketTokens).catch((error: unknown) => {
-      logger.warn({ err: error }, "Expo push receipt processing failed");
-    });
+    void processExpoReceipts(ticketTokens);
   }, expoReceiptDelayMs);
   timer.unref();
 }
 
-async function sendExpoBatch(messages: ExpoPushMessage[]): Promise<void> {
-  if (messages.length === 0) return;
+async function sendExpoBatch(
+  messages: ExpoPushMessage[],
+  options: ExpoBatchOptions = {},
+): Promise<ExpoBatchResult> {
+  if (messages.length === 0) {
+    return { ticketSummary: emptyPushTicketSummary(), receipt: null };
+  }
   const response = await fetch(env.EXPO_PUSH_API_URL, {
     method: "POST",
     headers: pushHeaders(),
@@ -379,7 +449,20 @@ async function sendExpoBatch(messages: ExpoPushMessage[]): Promise<void> {
   if (errorCodes.length > 0) {
     logger.warn({ errorCodes }, "Expo push tickets reported delivery errors");
   }
-  scheduleExpoReceiptCheck(ticketTokenPairsFromResponse(tokens, body));
+
+  const ticketTokens = ticketTokenPairsFromResponse(tokens, body);
+  if (options.waitForReceipt === true) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, options.receiptDelayMs ?? expoReceiptDelayMs);
+    });
+    return {
+      ticketSummary: summary,
+      receipt: await processExpoReceipts(ticketTokens),
+    };
+  }
+
+  scheduleExpoReceiptCheck(ticketTokens);
+  return { ticketSummary: summary, receipt: null };
 }
 
 function deviceTokensFromMessages(messages: ExpoPushMessage[]): string[] {
@@ -389,6 +472,73 @@ function deviceTokensFromMessages(messages: ExpoPushMessage[]): string[] {
 async function sendPushMessages(messages: ExpoPushMessage[]): Promise<void> {
   for (let index = 0; index < messages.length; index += expoBatchSize) {
     await sendExpoBatch(messages.slice(index, index + expoBatchSize));
+  }
+}
+
+function buildDiagnosticPushPayload(token: string): ExpoPushMessage {
+  return {
+    to: token,
+    title: "Terqivo Connect Test",
+    body: "Push notifications are working.",
+    data: { type: "diagnostic" },
+    sound: "default",
+    priority: "high",
+    channelId: "messages",
+  };
+}
+
+export async function sendDiagnosticPush(
+  userId: string,
+  options: Pick<ExpoBatchOptions, "receiptDelayMs"> = {},
+): Promise<PushDiagnosticResult> {
+  const devices = await getEnabledPushDevices(userId);
+  logger.info(
+    {
+      event: "push.diagnostic_requested",
+      recipientId: userId,
+      activeDeviceCount: devices.length,
+    },
+    "Diagnostic push requested",
+  );
+
+  if (devices.length === 0) {
+    return {
+      activeDeviceCount: 0,
+      expoTicketStatus: "not_sent",
+      ticketIdPresent: false,
+      expoReceiptStatus: "not_checked",
+      receiptErrorCode: null,
+    };
+  }
+
+  try {
+    const batchOptions: ExpoBatchOptions = { waitForReceipt: true };
+    if (options.receiptDelayMs !== undefined) {
+      batchOptions.receiptDelayMs = options.receiptDelayMs;
+    }
+    const result = await sendExpoBatch(
+      devices.map((device) => buildDiagnosticPushPayload(device.pushToken)),
+      batchOptions,
+    );
+    return {
+      activeDeviceCount: devices.length,
+      expoTicketStatus: ticketStatus(result.ticketSummary),
+      ticketIdPresent: result.ticketSummary.ticketIdCount > 0,
+      expoReceiptStatus: result.receipt?.status ?? "not_checked",
+      receiptErrorCode: result.receipt?.summary.errorCodes[0] ?? null,
+    };
+  } catch (error: unknown) {
+    logger.warn(
+      { event: "push.diagnostic_failed", recipientId: userId, err: error },
+      "Diagnostic push delivery failed",
+    );
+    return {
+      activeDeviceCount: devices.length,
+      expoTicketStatus: "error",
+      ticketIdPresent: false,
+      expoReceiptStatus: "not_checked",
+      receiptErrorCode: null,
+    };
   }
 }
 

@@ -5,6 +5,7 @@ import {
   registerPushDevice,
   removePushDevice,
 } from "./notification.service.js";
+import { sendDiagnosticPush } from "./push.service.js";
 import {
   registerPushDeviceSchema,
   removePushDeviceSchema,
@@ -41,7 +42,18 @@ async function handleRemove(
   response.status(200).json({ success: true, data: { removed } });
 }
 
+async function handleDiagnosticPush(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const context = requireAuthContext(request);
+  const result = await sendDiagnosticPush(context.userId);
+  response.status(200).json({ success: true, data: result });
+}
+
 export const registerPushDeviceController: RequestHandler =
   controller(handleRegister);
 export const removePushDeviceController: RequestHandler =
   controller(handleRemove);
+export const diagnosticPushController: RequestHandler =
+  controller(handleDiagnosticPush);

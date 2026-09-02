@@ -1,6 +1,14 @@
 import { Types } from "mongoose";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { createApp } from "../src/app.js";
 import {
@@ -10,6 +18,7 @@ import {
   invalidPushTokensFromResponse,
   invalidPushTokensFromReceiptResponse,
   pushReceiptErrorCodesFromResponse,
+  sendDiagnosticPush,
 } from "../src/modules/notifications/push.service.js";
 import { disablePushTokens } from "../src/modules/notifications/notification.service.js";
 import { PushDeviceModel } from "../src/modules/notifications/push-device.model.js";
@@ -71,6 +80,78 @@ describe("push notification devices and payloads", () => {
     expect(countAfterDuplicate).toBe(1);
     expect(wrongOwner.body.data.removed).toBe(false);
     expect(removed.body.data.removed).toBe(true);
+  });
+
+  it("protects the temporary diagnostic push route and returns safe delivery diagnostics", async () => {
+    const unauthenticated = await request(app)
+      .post("/api/v1/notifications/diagnostics/test-push")
+      .send({});
+
+    expect(unauthenticated.status).toBe(401);
+
+    const alice = authData(await register());
+    const firstDiagnostic = await request(app)
+      .post("/api/v1/notifications/diagnostics/test-push")
+      .set(authHeader(alice.accessToken))
+      .send({});
+    const rateLimitedDiagnostic = await request(app)
+      .post("/api/v1/notifications/diagnostics/test-push")
+      .set(authHeader(alice.accessToken))
+      .send({});
+
+    expect(firstDiagnostic.status).toBe(200);
+    expect(firstDiagnostic.body.data).toEqual({
+      activeDeviceCount: 0,
+      expoTicketStatus: "not_sent",
+      ticketIdPresent: false,
+      expoReceiptStatus: "not_checked",
+      receiptErrorCode: null,
+    });
+    expect(rateLimitedDiagnostic.status).toBe(429);
+
+    await request(app)
+      .post("/api/v1/notifications/devices")
+      .set(authHeader(alice.accessToken))
+      .send({
+        pushToken: "ExponentPushToken[diagnostic-device]",
+        platform: "android",
+        deviceId: "android-1",
+      })
+      .expect(200);
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: [{ status: "ok", id: "ticket-1" }] }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: { "ticket-1": { status: "ok" } } }),
+          { status: 200 },
+        ),
+      );
+
+    try {
+      const result = await sendDiagnosticPush(alice.user.id, {
+        receiptDelayMs: 0,
+      });
+
+      expect(result).toEqual({
+        activeDeviceCount: 1,
+        expoTicketStatus: "ok",
+        ticketIdPresent: true,
+        expoReceiptStatus: "ok",
+        receiptErrorCode: null,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(result)).not.toContain("diagnostic-device");
+      expect(JSON.stringify(result)).not.toContain("ticket-1");
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it("builds safe message, incoming-call, and missed-call metadata", () => {
