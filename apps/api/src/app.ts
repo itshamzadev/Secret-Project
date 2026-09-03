@@ -8,6 +8,7 @@ import { pinoHttp } from "pino-http";
 
 import { allowedWebOrigins } from "./config/env.js";
 import { AppError } from "./core/errors.js";
+import { mountAdminUi } from "./core/admin-ui.js";
 import { logger } from "./lib/logger.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
@@ -89,6 +90,8 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/notifications", createNotificationRouter());
   apiV1Router.use("/admin", createAdminRouter());
   app.use("/api/v1", apiV1Router);
+
+  mountAdminUi(app);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
