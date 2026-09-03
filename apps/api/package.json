@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write src tests *.json *.ts",
-    "test": "pnpm --filter @terqivo/contracts build && vitest run"
+    "test": "pnpm --filter @terqivo/contracts build && vitest run",
+    "admin:bootstrap": "tsx src/modules/admin/admin.bootstrap.ts",
+    "admin:bootstrap:dist": "node dist/modules/admin/admin.bootstrap.js"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",

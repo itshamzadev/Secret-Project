@@ -90,6 +90,38 @@ const environmentSchema = z.object({
       typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().trim().min(1).optional(),
   ),
+  ADMIN_JWT_SECRET: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().min(32).optional(),
+  ),
+  ADMIN_ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3600)
+    .default(900),
+  ADMIN_LOGIN_RATE_LIMIT_MAX: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(10),
+  ADMIN_BOOTSTRAP_EMAIL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().email().optional(),
+  ),
+  ADMIN_BOOTSTRAP_PASSWORD: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().min(12).max(1024).optional(),
+  ),
+  ADMIN_BOOTSTRAP_DISPLAY_NAME: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).max(100).optional(),
+  ),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 import { authenticate } from "../../middleware/authenticate.js";
 import {
@@ -11,7 +11,8 @@ import {
 const diagnosticPushRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 1,
-  keyGenerator: (request) => request.auth?.userId ?? request.ip ?? "unknown",
+  keyGenerator: (request) =>
+    request.auth?.userId ?? ipKeyGenerator(request.ip ?? "unknown"),
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: {

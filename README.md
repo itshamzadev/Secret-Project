@@ -1,12 +1,17 @@
 # Terqivo Connect
 
-Terqivo Connect is a cross-platform communication and social application. This repository contains the production-oriented central backend and the first Android client foundation. Web, iOS, desktop, and admin clients remain intentionally out of scope for this phase.
+Terqivo Connect is a cross-platform communication and social application. This repository contains the production-oriented central backend plus the Android, Web, Desktop, iOS-target, and PHP admin foundations. The Node API remains the single application data and authorization boundary.
 
 ## Architecture
 
 - `apps/api`: TypeScript + Express API, Socket.IO server, MongoDB/Mongoose integration, Redis integration, validation, logging, middleware, health endpoints, users/authentication/session management, contacts, direct conversations, messages, receipts, presence, calls, and push-device registration/delivery.
 - `apps/android`: Expo development-client Android application using Expo Router, TanStack Query, Zustand, Axios, Socket.IO Client, React Hook Form, Zod, SecureStore, and Expo Notifications. It currently contains authentication, contacts, direct chats, text messaging, receipts, typing, presence, calls, and notification routing UI.
+- `apps/web`: Vite/React web client foundation using the shared API and realtime packages. Login/session restoration, contacts, direct conversations, and text messaging are connected to the central API.
+- `apps/desktop`: Secure Electron desktop foundation. The renderer has no Node access; refresh tokens are encrypted in the main process and direct messaging uses the shared API/realtime packages.
+- `apps/admin`: Small PHP 8.2+ server-rendered admin panel. It calls the central Node Admin API and does not own application data.
 - `packages/contracts`: Shared API contract package for types, DTOs, enums, and validation schemas. It contains no backend business logic.
+- `packages/api-client`: Typed Axios client with coordinated rotating-session refresh for browser/native-style clients.
+- `packages/realtime-client`: Shared authenticated Socket.IO client for messaging, presence, typing, receipts, calls, and signaling.
 - `infra`: Local Docker Compose infrastructure for MongoDB and Redis.
 - `docs`: Reserved for architecture and operational documentation.
 
@@ -17,6 +22,7 @@ The backend uses feature-based modules. The current product phase includes phone
 - Node.js 24
 - pnpm 11
 - Docker Desktop with Docker Compose
+- PHP 8.2+ for the optional server-rendered admin panel
 
 ## Local setup
 
@@ -129,6 +135,7 @@ The API listens on `http://localhost:5000` by default. The current endpoints are
 - `/api/v1/contacts`: owner-scoped contact creation, listing, custom-name updates, and removal.
 - `/api/v1/conversations`: direct conversation creation/listing and direct text message history, sending, and read cursors.
 - `/api/v1/calls`: authenticated one-to-one voice/video call history and call details.
+- `/api/v1/admin`: separate admin login, dashboard, and cursor-paginated user read APIs.
 
 ## Authentication
 
@@ -141,6 +148,16 @@ Authorization: Bearer <access-token>
 ```
 
 Refresh tokens are opaque, rotated on every refresh, stored only as HMAC hashes in `auth_sessions`, and also issued in an HttpOnly `terqivo_refresh_token` cookie for browser compatibility. Native clients may send the refresh token in the JSON body to `POST /api/v1/auth/refresh`.
+
+The browser client keeps its short-lived access token in memory and uses the
+HttpOnly refresh cookie. The desktop client keeps its refresh token encrypted
+through Electron's main-process `safeStorage` API. Shared API and Socket.IO
+clients live in `packages/api-client` and `packages/realtime-client`; clients
+never connect directly to MongoDB or Redis.
+
+Web and Desktop are login-only clients. They restore existing sessions and
+cannot create accounts; account registration remains available only through
+the supported account-creation client flow.
 
 Available endpoints:
 
@@ -194,6 +211,45 @@ Example development registration request:
 $body = @{ username = "alice"; name = "Alice"; phone = "+14155550101"; email = "alice@example.com"; password = "a-long-development-password"; platform = "windows" } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://localhost:5000/api/v1/auth/register -ContentType "application/json" -Body $body
 ```
+
+## Admin API and PHP panel
+
+The Node API exposes a separate `/api/v1/admin` surface for administrative
+operations. `AdminUser` documents are stored in MongoDB's `admin_users`
+collection, use Argon2id, and are authorized through explicit RBAC permissions.
+Admin JWTs use a separate `ADMIN_JWT_SECRET` and are short-lived. Configure that
+secret in the server environment and create the first administrator with:
+
+```powershell
+pnpm --filter @terqivo/api admin:bootstrap
+```
+
+The bootstrap command requires temporary `ADMIN_BOOTSTRAP_EMAIL`,
+`ADMIN_BOOTSTRAP_PASSWORD`, and `ADMIN_BOOTSTRAP_DISPLAY_NAME` environment
+values. Remove those bootstrap values after the administrator is created.
+
+The initial API endpoints are:
+
+- `POST /api/v1/admin/auth/login`
+- `POST /api/v1/admin/auth/logout`
+- `GET /api/v1/admin/auth/me`
+- `GET /api/v1/admin/dashboard`
+- `GET /api/v1/admin/users?limit=25&cursor=<cursor>&search=<term>`
+
+The PHP panel in `apps/admin` calls these APIs using a server-side session. It
+does not use MySQL and it never reads MongoDB directly. Run it locally with:
+
+```powershell
+Copy-Item apps/admin/.env.example apps/admin/.env
+php -S 127.0.0.1:8080 -t apps/admin/public apps/admin/public/index.php
+```
+
+Set `ADMIN_API_BASE_URL` in the process environment when the Node API is
+deployed elsewhere. The current panel is intentionally read-oriented; future
+moderation actions must be added as permission-checked Node API endpoints first.
+
+The full cross-client topology and deployment boundaries are documented in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Contacts and direct messaging
 
@@ -344,8 +400,17 @@ apps/
       lib/
       store/
       theme/
+  web/
+    src/
+  desktop/
+    src/
+  admin/
+    public/
+    src/
 packages/
   contracts/
+  api-client/
+  realtime-client/
 infra/
 docs/
 ```

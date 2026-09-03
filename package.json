@@ -10,17 +10,25 @@
   },
   "scripts": {
     "dev": "pnpm --filter @terqivo/api dev",
+    "web:dev": "pnpm --filter @terqivo/web dev",
+    "desktop:dev": "pnpm --filter @terqivo/desktop dev",
+    "admin:dev": "php -S 127.0.0.1:8080 -t apps/admin/public apps/admin/public/index.php",
     "android:dev": "pnpm --filter @terqivo/android android:dev",
     "build": "pnpm -r run build",
-    "typecheck": "pnpm --filter @terqivo/contracts typecheck && pnpm --filter @terqivo/api typecheck && pnpm --filter @terqivo/android typecheck",
+    "typecheck": "pnpm --filter @terqivo/contracts typecheck && pnpm --filter @terqivo/api-client typecheck && pnpm --filter @terqivo/realtime-client typecheck && pnpm --filter @terqivo/api typecheck && pnpm --filter @terqivo/android typecheck && pnpm --filter @terqivo/web typecheck && pnpm --filter @terqivo/desktop typecheck",
     "android:typecheck": "pnpm --filter @terqivo/android typecheck",
-    "lint": "pnpm --filter @terqivo/api lint && pnpm --filter @terqivo/android lint",
+    "lint": "pnpm --filter @terqivo/api-client lint && pnpm --filter @terqivo/realtime-client lint && pnpm --filter @terqivo/api lint && pnpm --filter @terqivo/android lint && pnpm --filter @terqivo/web lint && pnpm --filter @terqivo/desktop lint",
     "android:lint": "pnpm --filter @terqivo/android lint",
-    "format": "pnpm --filter @terqivo/contracts format && pnpm --filter @terqivo/api format && pnpm --filter @terqivo/android format",
-    "test": "pnpm --filter @terqivo/api test && pnpm --filter @terqivo/android test",
+    "format": "pnpm --filter @terqivo/contracts format && pnpm --filter @terqivo/api-client format && pnpm --filter @terqivo/realtime-client format && pnpm --filter @terqivo/api format && pnpm --filter @terqivo/android format && pnpm --filter @terqivo/web format && pnpm --filter @terqivo/desktop format",
+    "test": "pnpm --filter @terqivo/api-client test && pnpm --filter @terqivo/realtime-client test && pnpm --filter @terqivo/api test && pnpm --filter @terqivo/android test && pnpm --filter @terqivo/web test && pnpm --filter @terqivo/desktop test",
     "android:test": "pnpm --filter @terqivo/android test",
     "infra:up": "docker compose -f infra/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
     "infra:logs": "docker compose -f infra/docker-compose.dev.yml logs -f"
+  },
+  "dependencies": {
+    "expo": "~57.0.18",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
   }
 }

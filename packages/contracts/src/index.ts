@@ -296,3 +296,76 @@ export interface CallActionData {
 export interface WebRtcRelayData {
   relayed: true;
 }
+
+export const adminRoles = [
+  "super_admin",
+  "admin",
+  "moderator",
+  "support",
+] as const;
+export type AdminRole = (typeof adminRoles)[number];
+
+export const adminPermissions = [
+  "dashboard.view",
+  "users.view",
+  "users.manage",
+  "users.suspend",
+  "reports.view",
+  "reports.resolve",
+  "calls.view_metadata",
+  "notifications.send",
+  "audit.view",
+] as const;
+export type AdminPermission = (typeof adminPermissions)[number];
+
+export interface AdminUserDto {
+  id: string;
+  email: string;
+  displayName: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuthenticationResponse {
+  admin: AdminUserDto;
+  accessToken: string;
+  accessTokenExpiresIn: number;
+}
+
+export interface AdminDashboardDto {
+  users: {
+    total: number;
+    active: number;
+    suspended: number;
+    disabled: number;
+    online: number;
+  };
+  conversations: { total: number };
+  messages: { total: number; today: number };
+  calls: { total: number; missed: number };
+  pushDevices: { enabled: number };
+  health: {
+    database: "connected" | "disconnected";
+    redis: "connected" | "disconnected";
+    uptime: number;
+  };
+}
+
+export interface AdminUserListItemDto {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
+  accountStatus: SafeUserDto["accountStatus"];
+  role: SafeUserDto["role"];
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserListItemDto[];
+  nextCursor: string | null;
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@terqivo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --config vite.config.ts --port 5174\" \"wait-on http://localhost:5174 && electron dist/main.js\"",
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "typecheck": "tsc --noEmit -p tsconfig.electron.json && tsc --noEmit -p tsconfig.renderer.json",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write src *.json *.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@terqivo/api-client": "workspace:*",
+    "@terqivo/contracts": "workspace:*",
+    "@terqivo/realtime-client": "workspace:*",
+    "electron": "^39.1.2",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.68.0",
+    "vite": "^7.1.7",
+    "vitest": "^4.1.11",
+    "wait-on": "^9.0.1"
+  }
+}
