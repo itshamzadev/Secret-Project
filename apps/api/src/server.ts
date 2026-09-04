@@ -13,6 +13,7 @@ import { initializePresenceModels } from "./modules/users/presence.service.js";
 import { initializeCallModels } from "./modules/calls/call.service.js";
 import { initializeNotificationModels } from "./modules/notifications/notification.service.js";
 import { initializeAdminModels } from "./modules/admin/admin.service.js";
+import { initializeMediaStorage } from "./modules/media/media.storage.js";
 import { createSocketServer, type SocketRuntime } from "./sockets/index.js";
 
 const app = createApp();
@@ -70,6 +71,7 @@ export async function startServer(): Promise<void> {
     await initializeCallModels();
     await initializeNotificationModels();
     await initializeAdminModels();
+    await initializeMediaStorage();
     socketRuntime = await createSocketServer(httpServer);
 
     await new Promise<void>((resolve, reject) => {

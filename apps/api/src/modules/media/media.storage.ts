@@ -1,10 +1,12 @@
 import { createReadStream } from "node:fs";
-import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, stat, unlink, writeFile } from "node:fs/promises";
+import { W_OK } from "node:constants";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { ReadStream } from "node:fs";
 
 import { env } from "../../config/env.js";
 import { AppError } from "../../core/errors.js";
+import { logger } from "../../lib/logger.js";
 
 export interface MediaFile {
   stream: ReadStream;
@@ -34,8 +36,13 @@ class LocalMediaStorage implements MediaStorage {
       : resolve(process.cwd(), directory);
   }
 
-  public async put(key: string, data: Buffer): Promise<void> {
+  public async initialize(): Promise<void> {
     await mkdir(this.root, { recursive: true });
+    await access(this.root, W_OK);
+  }
+
+  public async put(key: string, data: Buffer): Promise<void> {
+    await this.initialize();
     await writeFile(this.safePath(key), data, { flag: "wx" });
   }
 
@@ -96,10 +103,22 @@ class UnconfiguredMediaStorage implements MediaStorage {
   }
 }
 
-export const mediaStorage: MediaStorage =
+const localMediaStorage =
   env.MEDIA_STORAGE_DRIVER === "local"
     ? new LocalMediaStorage(env.MEDIA_STORAGE_PATH)
-    : new UnconfiguredMediaStorage();
+    : null;
+
+export const mediaStorage: MediaStorage =
+  localMediaStorage ?? new UnconfiguredMediaStorage();
+
+export async function initializeMediaStorage(): Promise<void> {
+  if (localMediaStorage === null) return;
+  await localMediaStorage.initialize();
+  logger.info(
+    { driver: "local", path: env.MEDIA_STORAGE_PATH },
+    "Media storage initialized",
+  );
+}
 
 function isNodeError(value: unknown): value is NodeJS.ErrnoException {
   return value instanceof Error && "code" in value;

@@ -48,9 +48,15 @@ export const errorHandler: ErrorRequestHandler = (
     code = "VALIDATION_ERROR";
     message = "Request validation failed.";
     details = error.issues;
-  } else if (isHttpLikeError(error) && error.status === 400) {
-    statusCode = 400;
-    code = "INVALID_REQUEST";
+  } else if (
+    isHttpLikeError(error) &&
+    (error.status === 400 || error.status === 413)
+  ) {
+    statusCode = error.status === 413 ? 413 : 400;
+    code =
+      error.type === "entity.too.large"
+        ? "REQUEST_TOO_LARGE"
+        : "INVALID_REQUEST";
     message =
       error.type === "entity.too.large"
         ? "Request body is too large."

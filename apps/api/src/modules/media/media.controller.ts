@@ -8,6 +8,7 @@ import { AppError } from "../../core/errors.js";
 import { sendMediaMessage } from "../messages/message.service.js";
 import { publishMessageCreated } from "../messages/message.events.js";
 import { mediaStorage } from "./media.storage.js";
+import { logger } from "../../lib/logger.js";
 import {
   detectMedia,
   mediaUploadQuerySchema,
@@ -37,29 +38,29 @@ async function handleUpload(
       statusCode: 404,
     });
   }
-  if (!Buffer.isBuffer(request.body)) {
-    throw new AppError({
-      code: "MEDIA_BODY_REQUIRED",
-      message: "A binary media body is required.",
-      statusCode: 400,
-    });
-  }
-  const detected = await detectMedia(input.type, request.body);
-  const storageKey = `${randomUUID()}.${detected.extension}`;
-  await mediaStorage.put(storageKey, request.body);
-  const media = {
-    url: `/api/v1/media/${storageKey}`,
-    storageKey,
-    mimeType: detected.mimeType,
-    size: request.body.length,
-    width: input.width ?? null,
-    height: input.height ?? null,
-    durationSeconds: input.durationSeconds ?? null,
-    thumbnailUrl: null,
-    fileName: sanitizeFileName(request.get("x-file-name")),
-  };
-
+  let storageKey: string | undefined;
   try {
+    if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+      throw new AppError({
+        code: "MEDIA_BODY_REQUIRED",
+        message: "A binary media body is required.",
+        statusCode: 400,
+      });
+    }
+    const detected = await detectMedia(input.type, request.body);
+    storageKey = `${randomUUID()}.${detected.extension}`;
+    await mediaStorage.put(storageKey, request.body);
+    const media = {
+      url: `/api/v1/media/${storageKey}`,
+      storageKey,
+      mimeType: detected.mimeType,
+      size: request.body.length,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      durationSeconds: input.durationSeconds ?? null,
+      thumbnailUrl: null,
+      fileName: sanitizeFileName(request.get("x-file-name")),
+    };
     const result = await sendMediaMessage(context, conversationId, {
       clientMessageId: input.clientMessageId,
       type: input.type,
@@ -79,7 +80,24 @@ async function handleUpload(
       data: { message: result.message, duplicate: result.duplicate },
     });
   } catch (error: unknown) {
-    await mediaStorage.remove(storageKey).catch(() => undefined);
+    if (storageKey !== undefined) {
+      await mediaStorage.remove(storageKey).catch(() => undefined);
+    }
+    logger.error(
+      {
+        conversationId,
+        userId: context.userId,
+        mediaType: input.type,
+        errorCategory:
+          error instanceof AppError
+            ? error.code
+            : error instanceof Error
+              ? error.name
+              : "UNKNOWN_ERROR",
+        statusCode: error instanceof AppError ? error.statusCode : 500,
+      },
+      "Media upload failed",
+    );
     throw error;
   }
 }

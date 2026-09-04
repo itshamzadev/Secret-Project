@@ -13,6 +13,8 @@ const binaryMediaBody = express.raw({
     "application/octet-stream",
     "application/pdf",
     "application/zip",
+    "application/gzip",
+    "text/plain",
     "audio/*",
     "image/*",
     "video/*",

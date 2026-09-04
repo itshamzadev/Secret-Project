@@ -100,6 +100,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/ai", createAiRouter());
   apiV1Router.use("/admin", createAdminRouter());
   app.use("/api/v1", apiV1Router);
+  logger.info(
+    { routePrefix: "/api/v1", loginRoute: "POST /api/v1/auth/login" },
+    "API v1 routes mounted",
+  );
 
   mountAdminUi(app);
 
