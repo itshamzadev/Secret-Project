@@ -80,13 +80,38 @@ export interface ContactDto {
 
 export type ConversationType = "direct";
 
+export const messageTypes = [
+  "text",
+  "image",
+  "video",
+  "audio",
+  "file",
+] as const;
+export type MessageType = (typeof messageTypes)[number];
+
+export interface MediaUploadMetadata {
+  mimeType: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  fileName: string | null;
+}
+
+export interface MessageMediaDto extends MediaUploadMetadata {
+  url: string;
+  storageKey: string;
+  thumbnailUrl: string | null;
+}
+
 export interface MessageDto {
   id: string;
   conversationId: string;
   senderId: string;
   clientMessageId: string;
-  type: "text";
-  text: string;
+  type: MessageType;
+  text: string | null;
+  media: MessageMediaDto | null;
   sequence: number;
   status: "sent" | "delivered" | "read";
   createdAt: string;
@@ -135,6 +160,29 @@ export interface SocketMessageSendInput {
   clientMessageId: string;
   type: "text";
   text: string;
+}
+
+export interface WebSearchResultDto {
+  title: string;
+  snippet: string;
+  url: string;
+  source: string;
+}
+
+export interface WebSearchResponseData {
+  query: string;
+  provider: "google" | "wikipedia";
+  results: WebSearchResultDto[];
+}
+
+export interface AiQueryRequest {
+  query: string;
+}
+
+export interface AiResponseData {
+  answer: string;
+  model: string;
+  grounded: boolean;
 }
 
 export interface SocketMessageEvent {

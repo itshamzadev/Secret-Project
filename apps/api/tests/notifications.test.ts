@@ -162,6 +162,7 @@ describe("push notification devices and payloads", () => {
       clientMessageId: "client-1",
       type: "text" as const,
       text: "  Hello   from Terqivo  ",
+      media: null,
       sequence: 1,
       status: "sent" as const,
       createdAt: "2026-09-02T00:00:00.000Z",

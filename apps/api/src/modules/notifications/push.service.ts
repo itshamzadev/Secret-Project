@@ -90,9 +90,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function notificationPreview(message: MessageDto): string {
-  if (message.type !== "text") return "New message";
-  const preview = message.text.replace(/\s+/g, " ").trim();
+  if (message.type === "image") return "Photo";
+  if (message.type === "video") return "Video";
+  if (message.type === "audio") return "Voice message";
+  if (message.type === "file") return "File";
+  const preview = message.text?.replace(/\s+/g, " ").trim() ?? "New message";
   return preview.length > 160 ? `${preview.slice(0, 157)}...` : preview;
+  /*
+  if (message.type === "image") return "📷 Photo";
+  if (message.type === "video") return "🎥 Video";
+  if (message.type === "audio") return "🎤 Voice message";
+  if (message.type === "file") return "📎 File";
+  const preview = message.text?.replace(/\s+/g, " ").trim() ?? "New message";
+  return preview.length > 160 ? `${preview.slice(0, 157)}...` : preview;
+  */
 }
 
 export function buildMessagePushPayload(

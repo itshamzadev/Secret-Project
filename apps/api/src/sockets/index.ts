@@ -68,6 +68,7 @@ import {
   dispatchIncomingCallNotification,
   dispatchMissedCallNotification,
 } from "../modules/notifications/push.service.js";
+import { subscribeToMessageCreated } from "../modules/messages/message.events.js";
 
 export interface SocketRuntime {
   io: Server;
@@ -604,6 +605,15 @@ export async function createSocketServer(
     broadcastCall(io, "call:missed", callSignal(call));
     await dispatchMissedCallNotification(call);
   });
+  const unsubscribeMessageEvents = subscribeToMessageCreated((event) => {
+    io.to(userRoom(event.recipientId)).emit("message:new", {
+      message: event.message,
+    });
+    io.to(userRoom(event.senderId)).emit("message:sent", {
+      message: event.message,
+      duplicate: false,
+    });
+  });
 
   io.on("connection", (socket) => {
     const context = contextForSocket(socket);
@@ -717,6 +727,7 @@ export async function createSocketServer(
     io,
     close: async () => {
       callTimeoutCoordinator.stop();
+      unsubscribeMessageEvents();
       await io.close();
       if (redisSubscriber.isOpen) {
         await redisSubscriber.quit();

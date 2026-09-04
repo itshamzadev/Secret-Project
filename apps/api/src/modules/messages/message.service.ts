@@ -46,11 +46,11 @@ export interface SentMessageResult {
 
 function findExistingMessage(
   context: AuthContext,
-  input: MessageTextInput,
+  clientMessageId: string,
 ): Promise<MessageDocument | null> {
   return MessageModel.findOne({
     senderId: new Types.ObjectId(context.userId),
-    clientMessageId: input.clientMessageId,
+    clientMessageId,
   }).exec();
 }
 
@@ -59,7 +59,7 @@ export async function sendTextMessage(
   conversationId: string,
   input: MessageTextInput,
 ): Promise<SentMessageResult> {
-  const existing = await findExistingMessage(context, input);
+  const existing = await findExistingMessage(context, input.clientMessageId);
   if (existing !== null) {
     if (existing.conversationId.toString() !== conversationId) {
       throw new AppError({
@@ -116,7 +116,10 @@ export async function sendTextMessage(
     });
   } catch (error) {
     if (isMongoDuplicateKeyError(error)) {
-      const concurrent = await findExistingMessage(context, input);
+      const concurrent = await findExistingMessage(
+        context,
+        input.clientMessageId,
+      );
       if (concurrent !== null) {
         const currentConversation = await getOwnedConversation(
           context,
@@ -154,6 +157,118 @@ export async function sendTextMessage(
 
   return {
     message: toMessageDto(message, currentConversation, context.userId),
+    conversation: currentConversation,
+    recipientId: recipientId.toString(),
+    duplicate: false,
+  };
+}
+
+export interface MediaMessageInput {
+  clientMessageId: string;
+  type: "image" | "video" | "audio" | "file";
+  media: NonNullable<MessageDocument["media"]>;
+}
+
+export async function sendMediaMessage(
+  context: AuthContext,
+  conversationId: string,
+  input: MediaMessageInput,
+): Promise<SentMessageResult> {
+  const existing = await findExistingMessage(context, input.clientMessageId);
+  if (existing !== null) {
+    if (existing.conversationId.toString() !== conversationId) {
+      throw new AppError({
+        code: "CLIENT_MESSAGE_ID_CONFLICT",
+        message: "The client message identifier is already used elsewhere.",
+        statusCode: 409,
+      });
+    }
+    const conversation = await getOwnedConversation(context, conversationId);
+    return {
+      message: toMessageDto(existing, conversation, context.userId),
+      conversation,
+      recipientId: getOtherParticipant(conversation, context.userId).toString(),
+      duplicate: true,
+    };
+  }
+
+  const conversation = await getOwnedConversation(context, conversationId);
+  const recipientId = getOtherParticipant(conversation, context.userId);
+  const updatedConversation = await ConversationModel.findOneAndUpdate(
+    {
+      _id: conversation._id,
+      "participants.userId": new Types.ObjectId(context.userId),
+    },
+    {
+      $inc: {
+        messageSequence: 1,
+        "participants.$[recipient].unreadCount": 1,
+      },
+    },
+    {
+      returnDocument: "after",
+      arrayFilters: [{ "recipient.userId": recipientId }],
+    },
+  ).exec();
+  if (updatedConversation === null) throw messageNotFound();
+
+  const now = new Date();
+  let message: MessageDocument;
+  try {
+    message = await MessageModel.create({
+      conversationId: conversation._id,
+      senderId: new Types.ObjectId(context.userId),
+      clientMessageId: input.clientMessageId,
+      type: input.type,
+      text: null,
+      media: input.media,
+      replyToMessageId: null,
+      sequence: updatedConversation.messageSequence,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (error) {
+    if (isMongoDuplicateKeyError(error)) {
+      const concurrent = await findExistingMessage(
+        context,
+        input.clientMessageId,
+      );
+      if (concurrent !== null) {
+        const currentConversation = await getOwnedConversation(
+          context,
+          conversationId,
+        );
+        return {
+          message: toMessageDto(
+            concurrent,
+            currentConversation,
+            context.userId,
+          ),
+          conversation: currentConversation,
+          recipientId: recipientId.toString(),
+          duplicate: true,
+        };
+      }
+    }
+    throw error;
+  }
+
+  await ConversationModel.updateOne(
+    { _id: conversation._id },
+    { $set: { lastMessageId: message._id, lastMessageAt: now } },
+  ).exec();
+  const currentConversation = await getOwnedConversation(
+    context,
+    conversationId,
+  );
+  const messageDto = toMessageDto(message, currentConversation, context.userId);
+  void dispatchNewDirectMessage({
+    message: messageDto,
+    recipientId: recipientId.toString(),
+    senderId: context.userId,
+  });
+  return {
+    message: messageDto,
     conversation: currentConversation,
     recipientId: recipientId.toString(),
     duplicate: false,

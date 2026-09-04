@@ -22,6 +22,12 @@ import { createMessageRouter } from "./modules/messages/message.routes.js";
 import { createUserRouter } from "./modules/users/user.routes.js";
 import { createCallRouter } from "./modules/calls/call.routes.js";
 import { createNotificationRouter } from "./modules/notifications/notification.routes.js";
+import {
+  createMediaFileRouter,
+  createMediaRouter,
+} from "./modules/media/media.routes.js";
+import { createSearchRouter } from "./modules/search/search.routes.js";
+import { createAiRouter } from "./modules/ai/ai.routes.js";
 import { createAdminRouter } from "./modules/admin/admin.routes.js";
 
 export interface CreateAppOptions {
@@ -88,6 +94,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/users", createUserRouter());
   apiV1Router.use("/calls", createCallRouter());
   apiV1Router.use("/notifications", createNotificationRouter());
+  apiV1Router.use("/conversations", createMediaRouter());
+  apiV1Router.use("/media", createMediaFileRouter());
+  apiV1Router.use("/search", createSearchRouter());
+  apiV1Router.use("/ai", createAiRouter());
   apiV1Router.use("/admin", createAdminRouter());
   app.use("/api/v1", apiV1Router);
 

@@ -5,7 +5,7 @@ Terqivo Connect is a cross-platform communication and social application. This r
 ## Architecture
 
 - `apps/api`: TypeScript + Express API, Socket.IO server, MongoDB/Mongoose integration, Redis integration, validation, logging, middleware, health endpoints, users/authentication/session management, contacts, direct conversations, messages, receipts, presence, calls, and push-device registration/delivery.
-- `apps/android`: Expo development-client Android application using Expo Router, TanStack Query, Zustand, Axios, Socket.IO Client, React Hook Form, Zod, SecureStore, and Expo Notifications. It currently contains authentication, contacts, direct chats, text messaging, receipts, typing, presence, calls, and notification routing UI.
+- `apps/android`: Expo development-client Android application using Expo Router, TanStack Query, Zustand, Axios, Socket.IO Client, React Hook Form, Zod, SecureStore, Expo Notifications, Expo Audio, Expo Image Picker, and Expo Video. It contains authentication, contacts, direct chats, text/media messaging, receipts, typing, presence, calls, and notification routing UI.
 - `apps/web`: Vite/React web client foundation using the shared API and realtime packages. Login/session restoration, contacts, direct conversations, and text messaging are connected to the central API.
 - `apps/desktop`: Secure Electron desktop foundation. The renderer has no Node access; refresh tokens are encrypted in the main process and direct messaging uses the shared API/realtime packages.
 - `apps/admin`: Small PHP 8.2+ server-rendered admin panel. It calls the central Node Admin API and does not own application data.
@@ -102,6 +102,34 @@ the rotated refresh token, retries the original request, and clears local
 credentials when the server rejects the session. Tokens and cookies are never
 written to application logs.
 
+### Android OTA updates
+
+The Android client uses Expo Updates with the EAS project already linked in
+`apps/android/app.json`. Updates use the `appVersion` runtime policy and the
+`production` channel, so JavaScript, screens, styling, and compatible assets
+can be delivered without installing a new APK. The app checks after an
+authenticated startup, when returning to the foreground (with a 30-minute
+throttle), and when the user opens the Update control in the Chats header.
+
+The Update control shows a dot only when a compatible update is available. The
+user confirms the download in the in-app modal; after the update is fetched,
+Expo Updates reloads the app automatically. Expo SDK 57 does not expose
+byte-level download progress through `fetchUpdateAsync`, so the modal reports
+the real lifecycle stages instead of inventing a percentage.
+
+Publish a compatible OTA update from the Android app directory with:
+
+```powershell
+cd E:\TC\apps\android
+npx eas-cli@latest update --channel production --message "Chats UI improvements"
+```
+
+Only changes compatible with the installed native runtime can use OTA. New
+native modules, permissions, WebRTC/native changes, Firebase configuration,
+or Expo SDK changes require a new production APK/AAB and an appropriate app
+version/runtime update. Development builds using Metro intentionally show that
+OTA checks are available only in release builds.
+
 Use these client checks from the repository root:
 
 ```powershell
@@ -110,13 +138,30 @@ pnpm android:lint
 pnpm android:test
 ```
 
+### Android messaging cache and receipts
+
+The Android client keeps a small per-user messaging cache in the native
+`expo-sqlite` database. Conversation summaries and recently loaded message
+history are restored before the authenticated app shell is shown, then
+revalidated against the API in the background. The cache is an offline/startup
+optimization only; MongoDB remains authoritative, and cached data is cleared
+when the user logs out.
+
+Outgoing messages use the server-backed progression `sending` → `sent` →
+`delivered` → `read`. The recipient acknowledges delivery only after an
+authenticated client receives or synchronizes the message. Opening a focused,
+foreground conversation immediately clears its local unread badge, then sends
+the read watermark over Socket.IO (with the REST endpoint as an offline
+fallback). Reconnects revalidate active queries, and the Chats screen
+acknowledges the latest incoming message per conversation so missed delivery
+receipts can recover without downloading every message again.
+
 Client routes currently include `(auth)/login`, `(auth)/register`,
 `(app)/chats`, `(app)/contacts`, `(app)/profile`, and
 `chat/[conversationId]`, `(app)/calls`, and `call/[callId]`. Chats and direct
 messages remain fully active; calls now use the real backend signaling flow and
 video uses the same local WebRTC stream for the tap-to-swap self preview.
-Groups, channels, stories, media, videos, and AI remain intentionally locked
-future areas.
+Groups, channels, stories, and social video remain intentionally future areas.
 
 ## Development
 
@@ -134,8 +179,36 @@ The API listens on `http://localhost:5000` by default. The current endpoints are
 - `/api/v1/auth`: registration, login, refresh, logout, current-user, and session/device endpoints.
 - `/api/v1/contacts`: owner-scoped contact creation, listing, custom-name updates, and removal.
 - `/api/v1/conversations`: direct conversation creation/listing and direct text message history, sending, and read cursors.
+- `/api/v1/conversations/:conversationId/media`: authenticated binary media upload. Message documents store only metadata and a storage reference.
+- `/api/v1/media/:storageKey`: authenticated participant-scoped media streaming.
 - `/api/v1/calls`: authenticated one-to-one voice/video call history and call details.
+- `/api/v1/search/web?q=...`: authenticated web search using Google Programmable Search when configured, otherwise an explicitly labelled Wikipedia provider.
+- `/api/v1/ai/query`: authenticated server-side Gemini query endpoint. The client sends only the explicit query; private chat history is not included.
 - `/api/v1/admin`: separate admin login, dashboard, and cursor-paginated user read APIs.
+
+### Media, Internet Search, and AI Search
+
+The Android composer sends photos, videos, and Expo Audio voice notes through the
+authenticated binary media endpoint. The API validates the file signature (not
+only the client MIME type), enforces `MEDIA_MAX_FILE_SIZE_BYTES`, generates a
+safe storage key, and stores media metadata on the normal `Message` document.
+The development default is the local adapter at `MEDIA_STORAGE_PATH`; a
+production deployment should use a persistent volume or a future S3-compatible
+adapter (`MEDIA_STORAGE_DRIVER=s3`, with the S3 credentials kept only on the
+server). Container-local storage is not durable without a mounted volume.
+
+Web Search is provider-backed and never scrapes Google HTML. Configure both
+`GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` on the backend to use
+Google Programmable Search; when they are absent, the response identifies the
+Wikipedia fallback as its provider. Search result links are restricted to HTTP
+and HTTPS before the Android client opens them.
+
+AI Search calls Gemini only from the backend. Set `GEMINI_API_KEY` in Coolify
+or the server environment and optionally override `GEMINI_MODEL`; the default
+is the configurable `gemini-3.8-flash` model. This phase uses plain Gemini
+responses (`grounded: false`) and does not claim current web knowledge or send
+private conversations as context. OTA/client public environment variables must
+never contain these provider credentials.
 
 ## Authentication
 
@@ -414,5 +487,7 @@ packages/
 infra/
 docs/
 ```
-#   S e c r e t - P r o j e c t  
+
+#   S e c r e t - P r o j e c t 
+ 
  

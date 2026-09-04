@@ -54,6 +54,7 @@ export function toMessageDto(
     clientMessageId: message.clientMessageId,
     type: message.type,
     text: message.text,
+    media: message.media ?? null,
     sequence: message.sequence,
     status: getMessageStatus(message, conversation, currentUserId),
     createdAt: message.createdAt.toISOString(),

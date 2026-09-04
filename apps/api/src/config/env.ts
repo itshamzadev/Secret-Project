@@ -90,6 +90,32 @@ const environmentSchema = z.object({
       typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().trim().min(1).optional(),
   ),
+  MEDIA_STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  MEDIA_STORAGE_PATH: z.string().trim().min(1).default("./storage/media"),
+  MEDIA_MAX_FILE_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1024)
+    .max(250 * 1024 * 1024)
+    .default(50 * 1024 * 1024),
+  GOOGLE_SEARCH_API_KEY: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).optional(),
+  ),
+  GOOGLE_SEARCH_ENGINE_ID: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).optional(),
+  ),
+  SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
+  GEMINI_API_KEY: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).optional(),
+  ),
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.8-flash"),
+  AI_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(20),
   ADMIN_JWT_SECRET: z.preprocess(
     (value) =>
       typeof value === "string" && value.trim() === "" ? undefined : value,
