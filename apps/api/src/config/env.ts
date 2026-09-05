@@ -98,16 +98,6 @@ const environmentSchema = z.object({
     .min(1024)
     .max(250 * 1024 * 1024)
     .default(50 * 1024 * 1024),
-  GOOGLE_SEARCH_API_KEY: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim() === "" ? undefined : value,
-    z.string().trim().min(1).optional(),
-  ),
-  GOOGLE_SEARCH_ENGINE_ID: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim() === "" ? undefined : value,
-    z.string().trim().min(1).optional(),
-  ),
   SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
   GEMINI_API_KEY: z.preprocess(
     (value) =>

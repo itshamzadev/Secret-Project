@@ -188,16 +188,23 @@ export interface SocketMessageSendInput {
 }
 
 export interface WebSearchResultDto {
-  title: string;
-  snippet: string;
+  title?: string;
+  snippet?: string;
   url: string;
   source: string;
 }
 
+export interface WebSearchSourceDto {
+  title?: string;
+  url: string;
+}
+
 export interface WebSearchResponseData {
   query: string;
-  provider: "google" | "wikipedia";
+  answer: string;
+  provider: "google";
   results: WebSearchResultDto[];
+  sources: WebSearchSourceDto[];
 }
 
 export const aiModelIds = [
@@ -250,6 +257,7 @@ export interface AiResponseData {
   route: "local" | "gemini" | "child";
   requestId: string;
   state: Extract<AiRequestState, "completed">;
+  sources?: WebSearchSourceDto[];
 }
 
 export interface AiModelOptionsData {

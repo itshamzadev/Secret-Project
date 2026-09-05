@@ -1,128 +1,91 @@
-import type { WebSearchResultDto } from "@terqivo/contracts";
+import type {
+  WebSearchResultDto,
+  WebSearchResponseData,
+} from "@terqivo/contracts";
 
-import { env } from "../../config/env.js";
 import { AppError } from "../../core/errors.js";
+import {
+  getConfiguredGeminiProvider,
+  type AiProvider,
+  type AiProviderResult,
+} from "../ai/ai.provider.js";
 
 export interface WebSearchProvider {
-  readonly name: "google" | "wikipedia";
-  search(query: string): Promise<WebSearchResultDto[]>;
+  readonly name: "google";
+  search(
+    query: string,
+  ): Promise<Pick<WebSearchResponseData, "answer" | "results" | "sources">>;
 }
 
-const requestTimeoutMs = 10_000;
-
-export function createWebSearchProvider(): WebSearchProvider {
-  if (
-    env.GOOGLE_SEARCH_API_KEY !== undefined &&
-    env.GOOGLE_SEARCH_ENGINE_ID !== undefined
-  ) {
-    return new GoogleSearchProvider(
-      env.GOOGLE_SEARCH_API_KEY,
-      env.GOOGLE_SEARCH_ENGINE_ID,
-    );
-  }
-  return new WikipediaSearchProvider();
-}
-
-class GoogleSearchProvider implements WebSearchProvider {
+class GoogleGroundedSearchProvider implements WebSearchProvider {
   public readonly name = "google" as const;
 
-  public constructor(
-    private readonly apiKey: string,
-    private readonly engineId: string,
-  ) {}
+  public constructor(private readonly gemini: AiProvider) {}
 
-  public async search(query: string): Promise<WebSearchResultDto[]> {
-    const url = new URL("https://www.googleapis.com/customsearch/v1");
-    url.searchParams.set("key", this.apiKey);
-    url.searchParams.set("cx", this.engineId);
-    url.searchParams.set("q", query);
-    url.searchParams.set("num", "10");
-    const response = await fetchWithTimeout(url);
-    if (!response.ok) {
-      throw new AppError({
-        code: "WEB_SEARCH_PROVIDER_ERROR",
-        message: "The web search provider is temporarily unavailable.",
-        statusCode: 502,
-      });
+  public async search(
+    query: string,
+  ): Promise<Pick<WebSearchResponseData, "answer" | "results" | "sources">> {
+    let result: AiProviderResult;
+    try {
+      result = await this.gemini.generate({ query, googleSearch: true });
+    } catch {
+      throw searchProviderError();
     }
-    const body: unknown = await response.json();
-    return parseGoogleResults(body);
+
+    const results = normalizeResults(result.sources ?? []);
+    return {
+      answer: result.answer,
+      results,
+      sources: results.map(({ title, url }) =>
+        title === undefined ? { url } : { title, url },
+      ),
+    };
   }
 }
 
-class WikipediaSearchProvider implements WebSearchProvider {
-  public readonly name = "wikipedia" as const;
+class UnconfiguredGoogleSearchProvider implements WebSearchProvider {
+  public readonly name = "google" as const;
 
-  public async search(query: string): Promise<WebSearchResultDto[]> {
-    const url = new URL("https://en.wikipedia.org/w/api.php");
-    url.searchParams.set("action", "query");
-    url.searchParams.set("list", "search");
-    url.searchParams.set("srsearch", query);
-    url.searchParams.set("srlimit", "10");
-    url.searchParams.set("format", "json");
-    url.searchParams.set("origin", "*");
-    const response = await fetchWithTimeout(url);
-    if (!response.ok) {
-      throw new AppError({
-        code: "WEB_SEARCH_PROVIDER_ERROR",
-        message: "The web search provider is temporarily unavailable.",
-        statusCode: 502,
-      });
-    }
-    const body: unknown = await response.json();
-    return parseWikipediaResults(body);
+  public search(): Promise<
+    Pick<WebSearchResponseData, "answer" | "results" | "sources">
+  > {
+    return Promise.reject(
+      new AppError({
+        code: "WEB_SEARCH_NOT_CONFIGURED",
+        message: "Web search is not configured yet.",
+        statusCode: 503,
+      }),
+    );
   }
 }
 
-async function fetchWithTimeout(url: URL): Promise<Response> {
-  const signal = AbortSignal.timeout(requestTimeoutMs);
-  try {
-    return await fetch(url, {
-      signal,
-      headers: { accept: "application/json" },
-    });
-  } catch {
-    throw new AppError({
-      code: "WEB_SEARCH_PROVIDER_ERROR",
-      message: "The web search provider is temporarily unavailable.",
-      statusCode: 502,
-    });
+export function createWebSearchProvider(
+  gemini: AiProvider | null = getConfiguredGeminiProvider(),
+): WebSearchProvider {
+  return gemini === null
+    ? new UnconfiguredGoogleSearchProvider()
+    : new GoogleGroundedSearchProvider(gemini);
+}
+
+export function normalizeResults(
+  results: readonly WebSearchResultDto[],
+): WebSearchResultDto[] {
+  const normalized = new Map<string, WebSearchResultDto>();
+  for (const result of results) {
+    const url = safeHttpUrl(result.url);
+    if (url === null || normalized.has(url)) continue;
+    const item: WebSearchResultDto = {
+      url,
+      source: result.source.trim() || new URL(url).hostname,
+    };
+    if (result.title?.trim()) item.title = result.title.trim();
+    if (result.snippet?.trim()) item.snippet = result.snippet.trim();
+    normalized.set(url, item);
   }
+  return [...normalized.values()];
 }
 
-function parseGoogleResults(value: unknown): WebSearchResultDto[] {
-  if (!isRecord(value) || !Array.isArray(value.items)) return [];
-  return value.items.flatMap((item: unknown) => {
-    if (!isRecord(item)) return [];
-    const title = stringValue(item.title);
-    const snippet = stringValue(item.snippet);
-    const url = safeHttpUrl(stringValue(item.link));
-    if (title === null || snippet === null || url === null) return [];
-    return [{ title, snippet, url, source: new URL(url).hostname }];
-  });
-}
-
-function parseWikipediaResults(value: unknown): WebSearchResultDto[] {
-  if (
-    !isRecord(value) ||
-    !isRecord(value.query) ||
-    !Array.isArray(value.query.search)
-  ) {
-    return [];
-  }
-  return value.query.search.flatMap((item: unknown) => {
-    if (!isRecord(item)) return [];
-    const title = stringValue(item.title);
-    const snippet = stripHtml(stringValue(item.snippet) ?? "");
-    const pageId = typeof item.pageid === "number" ? item.pageid : null;
-    if (title === null || pageId === null) return [];
-    const url = `https://en.wikipedia.org/?curid=${pageId}`;
-    return [{ title, snippet, url, source: "wikipedia.org" }];
-  });
-}
-
-function safeHttpUrl(value: string | null): string | null {
-  if (value === null) return null;
+function safeHttpUrl(value: string): string | null {
   try {
     const url = new URL(value);
     return url.protocol === "http:" || url.protocol === "https:"
@@ -133,19 +96,10 @@ function safeHttpUrl(value: string | null): string | null {
   }
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
-}
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, "")
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function searchProviderError(): AppError {
+  return new AppError({
+    code: "WEB_SEARCH_PROVIDER_ERROR",
+    message: "The web search provider is temporarily unavailable.",
+    statusCode: 502,
+  });
 }

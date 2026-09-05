@@ -11,10 +11,12 @@ import { aiModelOptions } from "@terqivo/contracts";
 class TestProvider implements AiProvider {
   public generateCalls = 0;
   public streamCalls = 0;
+  public readonly inputs: AiProviderInput[] = [];
   public fail = false;
 
   public async generate(input: AiProviderInput): Promise<AiProviderResult> {
     this.generateCalls += 1;
+    this.inputs.push(input);
     if (this.fail) throw new Error("provider failed");
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
     return { answer: `answer:${input.query}`, providerModel: "test-model" };
@@ -24,6 +26,7 @@ class TestProvider implements AiProvider {
     input: AiProviderInput,
   ): AsyncGenerator<string, void, undefined> {
     this.streamCalls += 1;
+    this.inputs.push(input);
     if (this.fail) throw new Error("provider failed");
     yield `answer:${input.query.slice(0, 3)}`;
     yield input.query.slice(3);
@@ -58,6 +61,45 @@ describe("Terqivo AI orchestration", () => {
     );
     expect(result.route).toBe("local");
     expect(result.answer).toBe("Hello! How can I help?");
+  });
+
+  it("does not invoke Google Search for a local greeting", async () => {
+    const { orchestrator, provider } = createOrchestrator();
+    const result = await orchestrator.answer(
+      { query: "hello", requestId: "local-search-request-1" },
+      { userId: "user-1" },
+    );
+
+    expect(result.route).toBe("local");
+    expect(provider.generateCalls).toBe(0);
+    expect(provider.inputs).toHaveLength(0);
+  });
+
+  it("enables Google Search for fresh Terqivo AI questions", async () => {
+    const { orchestrator, provider } = createOrchestrator();
+    const result = await orchestrator.answer(
+      {
+        query: "What is the latest Android version?",
+        requestId: "current-search-request-1",
+      },
+      { userId: "user-1" },
+    );
+
+    expect(result.route).toBe("gemini");
+    expect(provider.inputs[0]?.googleSearch).toBe(true);
+  });
+
+  it("enables Google Search for an explicit Google search request", async () => {
+    const { orchestrator, provider } = createOrchestrator();
+    await orchestrator.answer(
+      {
+        query: "Search Google for current Android news",
+        requestId: "explicit-search-request-1",
+      },
+      { userId: "user-1" },
+    );
+
+    expect(provider.inputs[0]?.googleSearch).toBe(true);
   });
 
   it("routes complex Terqivo AI requests through the provider", async () => {

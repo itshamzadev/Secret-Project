@@ -1,6 +1,6 @@
 # Search
 
 Authenticated web search is exposed through the `/api/v1/search/web` endpoint.
-The provider abstraction uses Google Programmable Search when both server-side
-Google credentials are configured and otherwise uses the explicitly labelled
-Wikipedia fallback. Provider keys never leave the API process.
+The endpoint uses Gemini's server-side Google Search grounding tool and returns
+only URLs and citation fields supplied by Gemini. Provider failures are
+reported as retryable errors. The Gemini key never leaves the API process.

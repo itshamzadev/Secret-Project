@@ -7,18 +7,19 @@ import type {
 } from "@terqivo/contracts";
 import { aiModelOptions } from "@terqivo/contracts";
 
-import { env } from "../../config/env.js";
 import { AppError } from "../../core/errors.js";
 import { logger } from "../../lib/logger.js";
 import { AiResponseCache } from "./ai.cache.js";
 import { resolveLocalAiResponse } from "./ai.local.js";
 import { PerConversationAiQueue } from "./ai.queue.js";
 import {
-  GeminiProvider,
+  getConfiguredGeminiProvider,
   TerqivoAIProvider,
   type AiProviderInput,
   type AiProvider,
+  type AiProviderResult,
 } from "./ai.provider.js";
+import { shouldUseGoogleSearch } from "./ai.web-routing.js";
 import { terqivoSystemPrompt } from "./terqivo/system-prompt.js";
 import type { AiQuery } from "./ai.validation.js";
 
@@ -88,10 +89,7 @@ export class AiOrchestrator {
     this.queue = options.queue ?? new PerConversationAiQueue();
 
     const defaultProvider =
-      options.geminiProvider ??
-      (env.GEMINI_API_KEY === undefined
-        ? null
-        : new GeminiProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL));
+      options.geminiProvider ?? getConfiguredGeminiProvider();
     this.geminiProvider = defaultProvider;
     this.terqivoProvider =
       options.terqivoProvider ??
@@ -270,12 +268,22 @@ export class AiOrchestrator {
     }
 
     const providerStartedAt = this.now();
+    const googleSearch =
+      route === "terqivo" && shouldUseGoogleSearch(request.query);
     let firstChunkAt: number | null = null;
     let answer = "";
+    let providerResult: AiProviderResult | undefined;
     if (streamOptions === undefined) {
-      answer = (await provider.generate({ query: request.query })).answer;
+      providerResult = await provider.generate({
+        query: request.query,
+        googleSearch,
+      });
+      answer = providerResult.answer;
     } else {
-      const providerInput: AiProviderInput = { query: request.query };
+      const providerInput: AiProviderInput = {
+        query: request.query,
+        googleSearch,
+      };
       if (streamOptions.signal !== undefined)
         providerInput.signal = streamOptions.signal;
       for await (const chunk of provider.stream(providerInput)) {
@@ -308,7 +316,12 @@ export class AiOrchestrator {
       });
     }
     return {
-      response: createResponse(request, normalizedAnswer, "gemini"),
+      response: createResponse(
+        request,
+        normalizedAnswer,
+        "gemini",
+        providerResult,
+      ),
       providerTTFTMs: Math.max(
         0,
         (firstChunkAt ?? this.now()) - providerStartedAt,
@@ -378,15 +391,28 @@ function createResponse(
   request: NormalizedRequest,
   answer: string,
   route: AiResponseData["route"],
+  providerResult?: {
+    grounded?: boolean;
+    sources?: AiResponseData["sources"];
+  },
 ): AiResponseData {
-  return {
+  const response: AiResponseData = {
     answer,
     model: request.modelId,
-    grounded: false,
+    grounded: providerResult?.grounded ?? false,
     route,
     requestId: request.requestId,
     state: "completed",
   };
+  if (
+    providerResult?.sources !== undefined &&
+    providerResult.sources.length > 0
+  ) {
+    response.sources = providerResult.sources.map(({ title, url }) =>
+      title === undefined ? { url } : { title, url },
+    );
+  }
+  return response;
 }
 
 function fingerprint(request: NormalizedRequest, userId: string): string {
