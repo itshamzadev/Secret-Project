@@ -59,12 +59,12 @@ describe("API foundation", () => {
   it("serves the admin SPA and its public assets", async () => {
     const root = await request(app).get("/admin").redirects(1);
     const page = await request(app).get("/admin/login");
-    const css = await request(app).get(
-      assetPath(/href="(\/admin\/assets\/[^"\\]+\.css)"/),
-    );
-    const javascript = await request(app).get(
-      assetPath(/src="(\/admin\/assets\/[^"\\]+\.js)"/),
-    );
+    const css = await request(app)
+      .get(assetPath(/href="(\/admin\/assets\/[^"\\]+\.css)"/))
+      .set("Origin", "http://untrusted.example");
+    const javascript = await request(app)
+      .get(assetPath(/src="(\/admin\/assets\/[^"\\]+\.js)"/))
+      .set("Origin", "http://untrusted.example");
     const missingAsset = await request(app).get(
       "/admin/assets/asset-that-does-not-exist.js",
     );
@@ -81,6 +81,15 @@ describe("API foundation", () => {
     expect(missingAsset.type).toBe("application/json");
     expect(css.body).not.toHaveProperty("error");
     expect(javascript.body).not.toHaveProperty("error");
+  });
+
+  it("keeps CORS enforcement on API routes", async () => {
+    const response = await request(app)
+      .get("/api/v1/health")
+      .set("Origin", "http://untrusted.example");
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("CORS_ORIGIN_DENIED");
   });
 
   it("keeps admin API routes protected independently of public assets", async () => {

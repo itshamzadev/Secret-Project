@@ -1,7 +1,12 @@
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors, { type CorsOptions } from "cors";
-import express, { type Express, Router } from "express";
+import express, {
+  type Express,
+  type Request,
+  type RequestHandler,
+  Router,
+} from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
@@ -60,6 +65,27 @@ function createCorsOptions(): CorsOptions {
   };
 }
 
+function isSameOriginRequest(request: Request, requestOrigin: string): boolean {
+  return `${request.protocol}://${request.get("host")}` === requestOrigin;
+}
+
+const apiCorsMiddleware: RequestHandler = (request, response, next) => {
+  const requestOrigin = request.get("origin");
+
+  // Same-origin admin/API requests do not need CORS headers. Skipping the
+  // cross-origin check here also prevents the public admin host from being
+  // mistaken for an unapproved external web origin.
+  if (
+    requestOrigin === undefined ||
+    isSameOriginRequest(request, requestOrigin)
+  ) {
+    next();
+    return;
+  }
+
+  cors(createCorsOptions())(request, response, next);
+};
+
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
   // Coolify/Traefik terminates one trusted proxy hop before this process.
@@ -85,7 +111,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
       },
     }),
   );
-  app.use(cors(createCorsOptions()));
+  // CORS is an API concern. Static Admin UI assets must be served directly
+  // and must not receive a JSON CORS rejection based on their Origin header.
+  app.use("/api", apiCorsMiddleware);
   app.use(compression());
   app.use(cookieParser());
   app.use(express.json({ limit: "1mb" }));
