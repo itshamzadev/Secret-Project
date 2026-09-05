@@ -13,6 +13,10 @@ const app = createApp({
 });
 
 describe("API foundation", () => {
+  it("trusts exactly one reverse-proxy hop for client IP resolution", () => {
+    expect(app.get("trust proxy")).toBe(1);
+  });
+
   it("returns the health status", async () => {
     const response = await request(app).get("/api/v1/health");
 

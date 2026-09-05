@@ -48,6 +48,10 @@ async function handleUpload(
         statusCode: 400,
       });
     }
+    const declaredMimeType =
+      request.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ??
+      null;
+    const fileName = request.get("x-file-name") ?? null;
     const inspected = await inspectMedia(request.body);
     logger.info(
       {
@@ -55,13 +59,19 @@ async function handleUpload(
         userId: context.userId,
         mediaType: input.type,
         byteSize: request.body.length,
-        declaredMimeType: request.get("content-type")?.split(";", 1)[0] ?? null,
+        declaredMimeType,
         detectedMimeType: inspected?.mimeType ?? null,
         detectedExtension: inspected?.extension ?? null,
+        isoBmff: inspected?.isIsoBmff ?? false,
+        hasAudioTrack: inspected?.hasAudioTrack ?? false,
+        hasVideoTrack: inspected?.hasVideoTrack ?? false,
       },
       "Media upload inspected",
     );
-    const detected = validateDetectedMedia(input.type, inspected);
+    const detected = validateDetectedMedia(input.type, inspected, {
+      declaredMimeType,
+      fileName,
+    });
     storageKey = `${randomUUID()}.${detected.extension}`;
     await mediaStorage.put(storageKey, request.body);
     const media = {
@@ -73,7 +83,7 @@ async function handleUpload(
       height: input.height ?? null,
       durationSeconds: input.durationSeconds ?? null,
       thumbnailUrl: null,
-      fileName: sanitizeFileName(request.get("x-file-name")),
+      fileName: sanitizeFileName(fileName ?? undefined),
     };
     const result = await sendMediaMessage(context, conversationId, {
       clientMessageId: input.clientMessageId,

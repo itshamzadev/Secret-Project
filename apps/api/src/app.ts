@@ -59,6 +59,9 @@ function createCorsOptions(): CorsOptions {
 
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
+  // Coolify/Traefik terminates one trusted proxy hop before this process.
+  // Limiting trust to one hop keeps req.ip safe for rate-limit keys.
+  app.set("trust proxy", 1);
   const getSnapshot = options.getHealthSnapshot ?? getHealthSnapshot;
 
   app.disable("x-powered-by");
