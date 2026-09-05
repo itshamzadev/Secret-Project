@@ -10,9 +10,10 @@ import { publishMessageCreated } from "../messages/message.events.js";
 import { mediaStorage } from "./media.storage.js";
 import { logger } from "../../lib/logger.js";
 import {
-  detectMedia,
+  inspectMedia,
   mediaUploadQuerySchema,
   sanitizeFileName,
+  validateDetectedMedia,
 } from "./media.validation.js";
 import { getOwnedMediaMessage } from "./media.service.js";
 
@@ -47,7 +48,20 @@ async function handleUpload(
         statusCode: 400,
       });
     }
-    const detected = await detectMedia(input.type, request.body);
+    const inspected = await inspectMedia(request.body);
+    logger.info(
+      {
+        conversationId,
+        userId: context.userId,
+        mediaType: input.type,
+        byteSize: request.body.length,
+        declaredMimeType: request.get("content-type")?.split(";", 1)[0] ?? null,
+        detectedMimeType: inspected?.mimeType ?? null,
+        detectedExtension: inspected?.extension ?? null,
+      },
+      "Media upload inspected",
+    );
+    const detected = validateDetectedMedia(input.type, inspected);
     storageKey = `${randomUUID()}.${detected.extension}`;
     await mediaStorage.put(storageKey, request.body);
     const media = {

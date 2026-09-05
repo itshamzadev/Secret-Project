@@ -46,27 +46,56 @@ export interface DetectedMedia {
   extension: string;
 }
 
+export interface InspectedMedia {
+  mimeType: string;
+  extension: string;
+}
+
+export async function inspectMedia(
+  data: Buffer,
+): Promise<InspectedMedia | null> {
+  const detected = await fileTypeFromBuffer(data);
+  return detected === undefined
+    ? null
+    : { mimeType: detected.mime, extension: detected.ext };
+}
+
 export async function detectMedia(
   type: MediaUploadQuery["type"],
   data: Buffer,
 ): Promise<DetectedMedia> {
-  const detected = await fileTypeFromBuffer(data);
-  if (detected === undefined) {
+  const inspected = await inspectMedia(data);
+  return validateDetectedMedia(type, inspected);
+}
+
+export function validateDetectedMedia(
+  type: MediaUploadQuery["type"],
+  inspected: InspectedMedia | null,
+): DetectedMedia {
+  if (inspected === null) {
     throw new AppError({
       code: "MEDIA_TYPE_NOT_ALLOWED",
       message: "This file type is not supported.",
       statusCode: 415,
     });
   }
-  const mimeType = detected?.mime;
-  if (mimeType === undefined || !allowedMimeTypes[type].includes(mimeType)) {
+
+  // Android's Expo high-quality recorder writes an ISO BMFF M4A file. The
+  // file-type package identifies its M4A brand as audio/x-m4a, while the
+  // recorder declares audio/mp4. This is still a signature-derived value;
+  // the client extension or Content-Type is never used to authorize it.
+  const mimeType =
+    inspected.extension === "m4a" && inspected.mimeType === "audio/x-m4a"
+      ? "audio/mp4"
+      : inspected.mimeType;
+  if (!allowedMimeTypes[type].includes(mimeType)) {
     throw new AppError({
       code: "MEDIA_TYPE_NOT_ALLOWED",
       message: "This file type is not supported.",
       statusCode: 415,
     });
   }
-  return { mimeType, extension: detected.ext };
+  return { mimeType, extension: inspected.extension };
 }
 
 export function sanitizeFileName(value: string | undefined): string | null {
