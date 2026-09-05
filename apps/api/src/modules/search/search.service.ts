@@ -1,12 +1,16 @@
 import type { WebSearchResponseData } from "@terqivo/contracts";
 
 import { logger } from "../../lib/logger.js";
-import { AiResponseCache } from "../ai/ai.cache.js";
+import { KnowledgeSearchCache } from "./search.cache.js";
 import { createWebSearchProvider } from "./search.provider.js";
 import type { WebSearchProvider } from "./search.provider.js";
+import { normalizeKnowledgeQuery } from "./search.query.js";
+import { searchRules } from "./search.rules.js";
 import type { WebSearchQuery } from "./search.validation.js";
 
-const searchCache = new AiResponseCache<WebSearchResponseData>(5 * 60_000);
+const searchCache = new KnowledgeSearchCache<WebSearchResponseData>(
+  searchRules.cacheTtlSeconds,
+);
 const defaultProvider = createWebSearchProvider();
 
 export async function searchWeb(
@@ -14,15 +18,17 @@ export async function searchWeb(
   provider: WebSearchProvider = defaultProvider,
 ): Promise<WebSearchResponseData> {
   const startedAt = Date.now();
-  const normalizedQuery = query.q.trim();
+  const normalizedQuery = normalizeKnowledgeQuery(query.q);
   const page = query.page;
-  const cacheKey = `serpapi:google.com:en:pk:${page}:${normalizedQuery.toLocaleLowerCase()}`;
-  const cached = searchCache.get(cacheKey);
+  const cacheKey = `terqivo:knowledge-search:en:${page}:${encodeURIComponent(
+    normalizedQuery.toLocaleLowerCase("en-US"),
+  )}`;
+  const cached = await searchCache.get(cacheKey);
   if (cached !== null) {
     logger.info(
       {
-        route: "google",
-        provider: "serpapi",
+        route: "knowledge",
+        provider: "terqivo",
         status: "completed",
         cacheHit: true,
         searchTotalMs: Math.max(0, Date.now() - startedAt),
@@ -36,8 +42,8 @@ export async function searchWeb(
 
   logger.info(
     {
-      route: "google",
-      provider: "serpapi",
+      route: "knowledge",
+      provider: "terqivo",
       status: "processing",
       queryLength: normalizedQuery.length,
       page,
@@ -52,11 +58,11 @@ export async function searchWeb(
       page,
       results: result.results,
     };
-    searchCache.set(cacheKey, response);
+    await searchCache.set(cacheKey, response);
     logger.info(
       {
-        route: "google",
-        provider: "serpapi",
+        route: "knowledge",
+        provider: "terqivo",
         status: "completed",
         cacheHit: false,
         searchTotalMs: Math.max(0, Date.now() - startedAt),
@@ -69,8 +75,8 @@ export async function searchWeb(
   } catch (error: unknown) {
     logger.warn(
       {
-        route: "google",
-        provider: "serpapi",
+        route: "knowledge",
+        provider: "terqivo",
         status: "failed",
         searchTotalMs: Math.max(0, Date.now() - startedAt),
       },

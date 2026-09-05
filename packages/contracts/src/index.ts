@@ -205,7 +205,7 @@ export interface WebSearchSourceDto {
 
 export interface WebSearchResponseData {
   query: string;
-  provider: "google";
+  provider: "terqivo";
   page: number;
   results: WebSearchResultDto[];
 }

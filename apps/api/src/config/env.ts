@@ -25,6 +25,21 @@ const environmentSchema = z.object({
         }),
       "must contain one or more valid HTTP(S) origins separated by commas",
     ),
+  // Optional public origin used for security policies that only make sense
+  // when the application is actually served over HTTPS.
+  PUBLIC_URL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z
+      .string()
+      .trim()
+      .url()
+      .refine((value) => {
+        const protocol = new URL(value).protocol;
+        return protocol === "http:" || protocol === "https:";
+      }, "must be an HTTP(S) URL")
+      .optional(),
+  ),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ISSUER: z.string().trim().min(1).default("terqivo-connect"),
@@ -99,11 +114,6 @@ const environmentSchema = z.object({
     .max(250 * 1024 * 1024)
     .default(50 * 1024 * 1024),
   SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
-  SERPAPI_API_KEY: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim() === "" ? undefined : value,
-    z.string().trim().min(1).optional(),
-  ),
   GEMINI_API_KEY: z.preprocess(
     (value) =>
       typeof value === "string" && value.trim() === "" ? undefined : value,

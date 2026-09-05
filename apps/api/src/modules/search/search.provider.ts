@@ -3,182 +3,369 @@ import type {
   WebSearchResultDto,
 } from "@terqivo/contracts";
 
-import { env } from "../../config/env.js";
 import { AppError } from "../../core/errors.js";
 import { logger } from "../../lib/logger.js";
+import {
+  buildSearchVariants,
+  normalizeKnowledgeQuery,
+} from "./search.query.js";
+import {
+  filterKnowledgeCandidates,
+  rankKnowledgeCandidates,
+  type KnowledgeCandidate,
+} from "./search.rank.js";
+import { searchRules } from "./search.rules.js";
 
 export interface WebSearchProvider {
-  readonly name: "google";
+  readonly name: "terqivo";
   search(
     query: string,
     page: number,
   ): Promise<Pick<WebSearchResponseData, "results">>;
 }
 
-interface SerpApiResponse {
-  organic_results?: unknown;
+interface WikimediaSearchResponse {
+  query?: {
+    search?: unknown;
+  };
   error?: unknown;
-  search_metadata?: unknown;
 }
 
-const serpApiEndpoint = "https://serpapi.com/search";
-const requestTimeoutMs = 15_000;
-const resultsPerPage = 10;
+interface WikimediaEnrichmentResponse {
+  query?: {
+    pages?: unknown;
+  };
+  error?: unknown;
+}
 
-export class SerpApiGoogleSearchProvider implements WebSearchProvider {
-  public readonly name = "google" as const;
+interface EnrichedPage {
+  pageId: number;
+  title: string;
+  url: string;
+  extract?: string;
+  description?: string;
+  thumbnail?: string;
+}
+
+const wikimediaEndpoint = "https://en.wikipedia.org/w/api.php";
+const wikimediaUserAgent = "TerqivoConnect/0.1 (https://terqivo.com)";
+const requestTimeoutMs = 15_000;
+
+/**
+ * Normal search is intentionally a free Wikimedia-backed knowledge lookup.
+ * AI/Gemini routing lives in the separate AI module and is not used here.
+ */
+export class WikipediaKnowledgeSearchProvider implements WebSearchProvider {
+  public readonly name = "terqivo" as const;
 
   public constructor(
-    private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
-    private readonly endpoint = serpApiEndpoint,
+    private readonly endpoint = wikimediaEndpoint,
   ) {}
 
   public async search(
     query: string,
     page: number,
   ): Promise<Pick<WebSearchResponseData, "results">> {
+    const normalizedQuery = normalizeKnowledgeQuery(query);
+    const variants = buildSearchVariants(normalizedQuery);
     const startedAt = Date.now();
-    const params = new URLSearchParams({
-      engine: "google",
-      q: query,
-      api_key: this.apiKey,
-      output: "json",
-      google_domain: "google.com",
-      hl: "en",
-      gl: "pk",
-      start: String((page - 1) * resultsPerPage),
-    });
 
-    let response: Response;
+    let searchResponses: WikimediaSearchResponse[];
     try {
-      response = await this.fetchImpl(`${this.endpoint}?${params.toString()}`, {
-        method: "GET",
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(requestTimeoutMs),
-      });
-    } catch {
-      this.logFailure("request", undefined, startedAt);
+      searchResponses = await Promise.all(
+        variants.map((variant) => this.searchVariant(variant, page)),
+      );
+    } catch (error: unknown) {
+      this.logFailure("search_request", startedAt, providerErrorStatus(error));
       throw searchProviderError();
     }
 
-    let body: SerpApiResponse;
-    try {
-      const value: unknown = await response.json();
-      if (!isRecord(value)) {
-        throw new Error("SerpApi response was not an object.");
-      }
-      body = value;
-    } catch {
-      this.logFailure("invalid_json", response.status, startedAt);
-      throw searchProviderError();
+    const candidates = searchResponses.flatMap((response) =>
+      parseSearchCandidates(response),
+    );
+    const filteredCandidates = filterKnowledgeCandidates(
+      candidates,
+      normalizedQuery,
+    );
+    if (filteredCandidates.length === 0) {
+      this.logSuccess(startedAt, 0);
+      return { results: [] };
     }
 
-    if (!response.ok) {
+    const rankedCandidates = rankKnowledgeCandidates(
+      filteredCandidates,
+      normalizedQuery,
+    ).slice(0, searchRules.resultsPerPage);
+
+    let enrichedPages: Map<number, EnrichedPage>;
+    try {
+      enrichedPages = await this.enrichPages(rankedCandidates);
+    } catch (error: unknown) {
       this.logFailure(
-        categoryForStatus(response.status),
-        response.status,
+        "enrichment_request",
         startedAt,
+        providerErrorStatus(error),
       );
       throw searchProviderError();
     }
-    if (body.error !== undefined || searchStatus(body) === "error") {
-      this.logFailure("upstream_error", response.status, startedAt);
-      throw searchProviderError();
+
+    const results = rankedCandidates.flatMap((candidate, index) => {
+      const pageInfo = enrichedPages.get(candidate.pageId);
+      if (pageInfo === undefined) return [];
+      const result = toSearchResult(pageInfo, candidate, index + 1);
+      return result === null ? [] : [result];
+    });
+
+    this.logSuccess(startedAt, results.length);
+    return { results };
+  }
+
+  private async searchVariant(
+    query: string,
+    page: number,
+  ): Promise<WikimediaSearchResponse> {
+    const params = new URLSearchParams({
+      action: "query",
+      list: "search",
+      srsearch: query,
+      srnamespace: "0",
+      srlimit: String(searchRules.resultsPerPage),
+      sroffset: String((page - 1) * searchRules.resultsPerPage),
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+    });
+    return this.fetchJson(`${this.endpoint}?${params.toString()}`);
+  }
+
+  private async enrichPages(
+    candidates: readonly KnowledgeCandidate[],
+  ): Promise<Map<number, EnrichedPage>> {
+    const pageIds = [
+      ...new Set(candidates.map((candidate) => candidate.pageId)),
+    ];
+    if (pageIds.length === 0) return new Map();
+
+    const params = new URLSearchParams({
+      action: "query",
+      pageids: pageIds.join("|"),
+      prop: "extracts|pageimages|description|info",
+      exintro: "1",
+      explaintext: "1",
+      exchars: String(searchRules.maxSnippetLength),
+      piprop: "thumbnail",
+      pithumbsize: "320",
+      inprop: "url",
+      redirects: "1",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+    });
+    const response = await this.fetchJson(
+      `${this.endpoint}?${params.toString()}`,
+    );
+    return parseEnrichedPages(response);
+  }
+
+  private async fetchJson(
+    url: string,
+  ): Promise<WikimediaSearchResponse & WikimediaEnrichmentResponse> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "user-agent": wikimediaUserAgent,
+        },
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+    } catch (error: unknown) {
+      throw new ProviderRequestError(error);
     }
 
-    return {
-      results: normalizeOrganicResults(body.organic_results),
-    };
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch (error: unknown) {
+      throw new ProviderRequestError(error, response.status);
+    }
+
+    if (!response.ok || !isRecord(value) || value.error !== undefined) {
+      throw new ProviderRequestError(undefined, response.status);
+    }
+    return value as WikimediaSearchResponse & WikimediaEnrichmentResponse;
   }
 
   private logFailure(
     errorCategory: string,
-    upstreamStatus: number | undefined,
     startedAt: number,
+    upstreamStatus?: number,
   ): void {
     logger.warn(
       {
-        provider: "serpapi",
-        upstreamStatus,
+        provider: "wikipedia",
         errorCategory,
+        upstreamStatus,
         elapsedMs: Math.max(0, Date.now() - startedAt),
       },
-      "SerpApi web search failed",
+      "Terqivo Knowledge Search failed",
     );
   }
-}
 
-class UnconfiguredSerpApiProvider implements WebSearchProvider {
-  public readonly name = "google" as const;
-
-  public search(): Promise<Pick<WebSearchResponseData, "results">> {
-    logger.warn(
+  private logSuccess(startedAt: number, resultCount: number): void {
+    logger.info(
       {
-        provider: "serpapi",
-        errorCategory: "not_configured",
-        elapsedMs: 0,
+        provider: "wikipedia",
+        resultCount,
+        elapsedMs: Math.max(0, Date.now() - startedAt),
       },
-      "SerpApi web search is not configured",
-    );
-    return Promise.reject(
-      new AppError({
-        code: "WEB_SEARCH_NOT_CONFIGURED",
-        message: "Web search is not configured yet.",
-        statusCode: 503,
-      }),
+      "Terqivo Knowledge Search provider completed",
     );
   }
 }
 
-export function createWebSearchProvider(
-  apiKey: string | undefined = env.SERPAPI_API_KEY,
-): WebSearchProvider {
-  return apiKey === undefined
-    ? new UnconfiguredSerpApiProvider()
-    : new SerpApiGoogleSearchProvider(apiKey);
+export function createWebSearchProvider(): WebSearchProvider {
+  return new WikipediaKnowledgeSearchProvider();
 }
 
-export function normalizeOrganicResults(value: unknown): WebSearchResultDto[] {
-  if (!Array.isArray(value)) return [];
+export function parseSearchCandidates(value: unknown): KnowledgeCandidate[] {
+  if (!isRecord(value) || !isRecord(value.query)) return [];
+  const searchItems = value.query.search;
+  if (!Array.isArray(searchItems)) return [];
 
-  const normalized = new Map<string, WebSearchResultDto>();
-  for (const item of value) {
-    if (!isRecord(item)) continue;
+  return searchItems.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const pageId = positiveInteger(item.pageid);
     const title = stringValue(item.title);
-    const url = safeHttpUrl(item.link);
-    if (url === null || normalized.has(url)) continue;
+    if (pageId === null || title === null) return [];
+    const snippet = cleanSearchText(item.snippet);
+    const candidate: KnowledgeCandidate = {
+      pageId,
+      title,
+      position:
+        positiveInteger(item.index) ?? positiveInteger(item.position) ?? 1,
+      namespace: positiveInteger(item.ns) ?? 0,
+    };
+    if (snippet !== undefined) candidate.snippet = snippet;
+    return [candidate];
+  });
+}
 
-    const result: WebSearchResultDto = { url };
-    if (title !== null) result.title = title;
-    const position = positiveInteger(item.position);
-    if (position !== null) result.position = position;
-    setOptionalString(result, "displayUrl", item.displayed_link);
-    setOptionalString(result, "snippet", item.snippet);
-    setOptionalString(result, "source", item.source);
-    setOptionalHttpUrl(result, "favicon", item.favicon);
-    setOptionalHttpUrl(result, "thumbnail", item.thumbnail);
-    normalized.set(url, result);
+export function parseEnrichedPages(value: unknown): Map<number, EnrichedPage> {
+  const pages =
+    isRecord(value) && isRecord(value.query) ? value.query.pages : undefined;
+  const pageItems = Array.isArray(pages)
+    ? pages
+    : isRecord(pages)
+      ? Object.values(pages)
+      : [];
+  const enriched = new Map<number, EnrichedPage>();
+
+  for (const item of pageItems) {
+    if (!isRecord(item)) continue;
+    const pageId = positiveInteger(item.pageid);
+    const title = stringValue(item.title);
+    const url = safeHttpUrl(item.fullurl) ?? safeHttpUrl(item.canonicalurl);
+    if (pageId === null || title === null || url === null) continue;
+
+    const thumbnail = isRecord(item.thumbnail)
+      ? safeHttpUrl(item.thumbnail.source)
+      : null;
+    const page: EnrichedPage = { pageId, title, url };
+    setOptionalString(page, "extract", item.extract);
+    setOptionalString(page, "description", item.description);
+    if (thumbnail !== null) page.thumbnail = thumbnail;
+    enriched.set(pageId, page);
   }
-  return [...normalized.values()];
+  return enriched;
+}
+
+export function cleanSearchText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const withoutTags = value.replace(/<[^>]*>/gu, " ");
+  const decoded = withoutTags
+    .replace(/&nbsp;/giu, " ")
+    .replace(/&amp;/giu, "&")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;|&apos;/giu, "'")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&#x([\da-f]+);/giu, (_, hex: string) => decodeCodePoint(hex, 16))
+    .replace(/&#(\d+);/gu, (_, decimal: string) => decodeCodePoint(decimal, 10))
+    .replace(/\s+/gu, " ")
+    .trim();
+  return decoded.length > 0
+    ? trimToWords(decoded, searchRules.maxSnippetLength)
+    : undefined;
+}
+
+function toSearchResult(
+  page: EnrichedPage,
+  candidate: KnowledgeCandidate,
+  position: number,
+): WebSearchResultDto | null {
+  const snippet = cleanSearchText(
+    page.extract ?? page.description ?? candidate.snippet,
+  );
+  const result: WebSearchResultDto = {
+    position,
+    title: page.title,
+    url: page.url,
+    displayUrl: new URL(page.url).hostname,
+    source: "Wikipedia",
+  };
+  if (snippet !== undefined) result.snippet = snippet;
+  if (page.thumbnail !== undefined) result.thumbnail = page.thumbnail;
+  return result;
+}
+
+function trimToWords(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const clipped = value
+    .slice(0, maxLength)
+    .replace(/\s+\S*$/u, "")
+    .trim();
+  return `${clipped || value.slice(0, maxLength).trim()}…`;
+}
+
+function searchProviderError(): AppError {
+  return new AppError({
+    code: "WEB_SEARCH_PROVIDER_ERROR",
+    message: "The knowledge search provider is temporarily unavailable.",
+    statusCode: 502,
+  });
+}
+
+class ProviderRequestError extends Error {
+  public constructor(
+    cause: unknown,
+    public readonly status?: number,
+  ) {
+    super(cause instanceof Error ? cause.message : "Wikimedia request failed");
+    this.name = "ProviderRequestError";
+  }
+}
+
+function providerErrorStatus(error: unknown): number | undefined {
+  return error instanceof ProviderRequestError ? error.status : undefined;
+}
+
+function decodeCodePoint(value: string, radix: number): string {
+  const codePoint = Number.parseInt(value, radix);
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+    ? String.fromCodePoint(codePoint)
+    : "";
 }
 
 function setOptionalString(
-  result: WebSearchResultDto,
-  key: "displayUrl" | "snippet" | "source",
+  target: EnrichedPage,
+  key: "extract" | "description",
   value: unknown,
 ): void {
-  const normalized = stringValue(value);
-  if (normalized !== null) result[key] = normalized;
-}
-
-function setOptionalHttpUrl(
-  result: WebSearchResultDto,
-  key: "favicon" | "thumbnail",
-  value: unknown,
-): void {
-  const normalized = safeHttpUrl(value);
-  if (normalized !== null) result[key] = normalized;
+  const normalized = cleanSearchText(value);
+  if (normalized !== undefined) target[key] = normalized;
 }
 
 function safeHttpUrl(value: unknown): string | null {
@@ -203,27 +390,6 @@ function positiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0
     ? value
     : null;
-}
-
-function searchStatus(value: SerpApiResponse): string | null {
-  if (!isRecord(value.search_metadata)) return null;
-  const status = value.search_metadata.status;
-  return typeof status === "string" ? status.toLowerCase() : null;
-}
-
-function categoryForStatus(status: number): string {
-  if (status === 401 || status === 403) return "credentials";
-  if (status === 429) return "rate_limited";
-  if (status >= 500) return "upstream_5xx";
-  return "upstream_http_error";
-}
-
-function searchProviderError(): AppError {
-  return new AppError({
-    code: "WEB_SEARCH_PROVIDER_ERROR",
-    message: "The web search provider is temporarily unavailable.",
-    statusCode: 502,
-  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

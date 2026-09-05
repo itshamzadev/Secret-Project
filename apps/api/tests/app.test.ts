@@ -32,6 +32,14 @@ describe("API foundation", () => {
     });
   });
 
+  it("does not upgrade assets when the public origin is not HTTPS", async () => {
+    const response = await request(app).get("/api/v1/health");
+
+    expect(response.headers["content-security-policy"]).not.toContain(
+      "upgrade-insecure-requests",
+    );
+  });
+
   it("returns a consistent error for an unknown API route", async () => {
     const response = await request(app).get("/api/v1/does-not-exist");
 

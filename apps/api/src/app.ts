@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { allowedWebOrigins } from "./config/env.js";
+import { allowedWebOrigins, env } from "./config/env.js";
 import { AppError } from "./core/errors.js";
 import { mountAdminUi } from "./core/admin-ui.js";
 import { logger } from "./lib/logger.js";
@@ -68,7 +68,23 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const getSnapshot = options.getHealthSnapshot ?? getHealthSnapshot;
 
   app.disable("x-powered-by");
-  app.use(helmet());
+  const publicUrlIsHttps =
+    env.PUBLIC_URL !== undefined &&
+    new URL(env.PUBLIC_URL).protocol === "https:";
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          // Helmet enables this by default in production. The current
+          // deployment is HTTP, so upgrading admin assets would make the
+          // browser request an untrusted HTTPS origin. Opt in only after the
+          // configured public origin is HTTPS.
+          "upgrade-insecure-requests": publicUrlIsHttps ? [] : null,
+        },
+      },
+    }),
+  );
   app.use(cors(createCorsOptions()));
   app.use(compression());
   app.use(cookieParser());

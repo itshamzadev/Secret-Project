@@ -6,7 +6,7 @@ import { searchWeb } from "../src/modules/search/search.service.js";
 import type { WebSearchProvider } from "../src/modules/search/search.provider.js";
 
 class FakeSearchProvider implements WebSearchProvider {
-  public readonly name = "google" as const;
+  public readonly name = "terqivo" as const;
   public calls = 0;
 
   public async search(
@@ -21,7 +21,7 @@ class FakeSearchProvider implements WebSearchProvider {
 }
 
 describe("web search service", () => {
-  it("returns the normalized Google result contract", async () => {
+  it("returns the normalized Terqivo Knowledge Search contract", async () => {
     const provider = new FakeSearchProvider();
     const result = await searchWeb(
       { q: "  public search contract  ", page: 1 },
@@ -30,7 +30,7 @@ describe("web search service", () => {
 
     expect(result).toEqual({
       query: "public search contract",
-      provider: "google",
+      provider: "terqivo",
       page: 1,
       results: [],
     });

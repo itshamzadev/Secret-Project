@@ -2,191 +2,279 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createWebSearchProvider,
-  normalizeOrganicResults,
-  SerpApiGoogleSearchProvider,
+  cleanSearchText,
+  WikipediaKnowledgeSearchProvider,
 } from "../src/modules/search/search.provider.js";
+import { buildSearchVariants } from "../src/modules/search/search.query.js";
+import {
+  filterKnowledgeCandidates,
+  rankKnowledgeCandidates,
+} from "../src/modules/search/search.rank.js";
 
-function serpApiResponse(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
 }
 
-describe("SerpApi Google web search provider", () => {
-  it("calls SerpApi with Google, the query, and the requested page", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      serpApiResponse({
-        search_metadata: { status: "Success" },
-        organic_results: [
-          {
-            position: 1,
-            title: "Example result",
-            link: "https://example.com/article",
-            displayed_link: "example.com › article",
-            source: "Example",
-            snippet: "A useful result.",
-            favicon: "https://example.com/favicon.ico",
-            thumbnail: "https://example.com/image.jpg",
+describe("Terqivo Knowledge Search provider", () => {
+  it("uses Wikimedia search, enriches pages in one batch, and returns truthful sources", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input) => {
+        const params = new URL(String(input)).searchParams;
+        if (params.get("list") === "search") {
+          return jsonResponse({
+            query: {
+              search: [
+                {
+                  pageid: 1,
+                  ns: 0,
+                  index: 1,
+                  title: "Ada Lovelace",
+                  snippet:
+                    '<span class="searchmatch">Ada</span> Lovelace was a mathematician.',
+                },
+                {
+                  pageid: 2,
+                  ns: 0,
+                  index: 2,
+                  title: "Ada Lovelace (disambiguation)",
+                  snippet: "Ada may refer to several topics.",
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({
+          query: {
+            pages: [
+              {
+                pageid: 1,
+                title: "Ada Lovelace",
+                fullurl: "https://en.wikipedia.org/wiki/Ada_Lovelace",
+                extract:
+                  "Ada Lovelace was an English mathematician and writer.",
+                thumbnail: {
+                  source: "https://upload.wikimedia.org/ada.jpg",
+                },
+              },
+              {
+                pageid: 2,
+                title: "Ada Lovelace (disambiguation)",
+                fullurl:
+                  "https://en.wikipedia.org/wiki/Ada_Lovelace_(disambiguation)",
+              },
+            ],
           },
-        ],
-      }),
-    );
-    const provider = new SerpApiGoogleSearchProvider(
-      "server-only-serpapi-test-key",
+        });
+      });
+    const provider = new WikipediaKnowledgeSearchProvider(
       fetchMock,
-      "https://serpapi.test/search",
+      "https://wikipedia.test/w/api.php",
     );
 
-    await expect(provider.search(" latest AI news ", 2)).resolves.toEqual({
+    await expect(
+      provider.search("  who   is Ada Lovelace? ", 2),
+    ).resolves.toEqual({
       results: [
         {
           position: 1,
-          title: "Example result",
-          url: "https://example.com/article",
-          displayUrl: "example.com › article",
-          source: "Example",
-          snippet: "A useful result.",
-          favicon: "https://example.com/favicon.ico",
-          thumbnail: "https://example.com/image.jpg",
+          title: "Ada Lovelace",
+          url: "https://en.wikipedia.org/wiki/Ada_Lovelace",
+          displayUrl: "en.wikipedia.org",
+          source: "Wikipedia",
+          snippet: "Ada Lovelace was an English mathematician and writer.",
+          thumbnail: "https://upload.wikimedia.org/ada.jpg",
         },
       ],
     });
 
-    const requestUrl = String(fetchMock.mock.calls[0]?.[0]);
-    const params = new URL(requestUrl).searchParams;
-    expect(params.get("engine")).toBe("google");
-    expect(params.get("q")).toBe(" latest AI news ");
-    expect(params.get("api_key")).toBe("server-only-serpapi-test-key");
-    expect(params.get("output")).toBe("json");
-    expect(params.get("google_domain")).toBe("google.com");
-    expect(params.get("hl")).toBe("en");
-    expect(params.get("gl")).toBe("pk");
-    expect(params.get("start")).toBe("10");
-    expect(JSON.stringify({ results: [] })).not.toContain(
-      "server-only-serpapi-test-key",
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const requests = fetchMock.mock.calls.map(
+      ([input]) => new URL(String(input)),
+    );
+    const searchRequests = requests.filter(
+      (request) => request.searchParams.get("list") === "search",
+    );
+    expect(
+      searchRequests.map((request) => request.searchParams.get("srsearch")),
+    ).toEqual(["Ada Lovelace", "who is Ada Lovelace"]);
+    expect(searchRequests[0]?.searchParams.get("sroffset")).toBe("10");
+    expect(searchRequests[0]?.searchParams.get("srnamespace")).toBe("0");
+
+    const enrichment = requests.find(
+      (request) => request.searchParams.get("pageids") !== null,
+    );
+    expect(enrichment?.searchParams.get("pageids")).toBe("1");
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(new Headers(headers).get("user-agent")).toContain("TerqivoConnect");
+  });
+
+  it("requires no provider key and creates the free Wikimedia provider", () => {
+    expect(createWebSearchProvider()).toBeInstanceOf(
+      WikipediaKnowledgeSearchProvider,
     );
   });
 
-  it("maps organic results without requiring optional fields", () => {
+  it("normalizes intent queries into a limited entity-first variant list", () => {
+    expect(buildSearchVariants("  who   is ItsHamzaDev? ")).toEqual([
+      "ItsHamzaDev",
+      "who is ItsHamzaDev",
+    ]);
+    expect(buildSearchVariants('"React hooks"')).toEqual(['"React hooks"']);
+  });
+
+  it("ranks exact titles above weaker matches and removes duplicate pages", () => {
+    const ranked = rankKnowledgeCandidates(
+      filterKnowledgeCandidates(
+        [
+          {
+            pageId: 3,
+            namespace: 0,
+            position: 1,
+            title: "Ada Lovelace (disambiguation)",
+            snippet: "Ada may refer to several topics.",
+          },
+          {
+            pageId: 1,
+            namespace: 0,
+            position: 2,
+            title: "Ada Lovelace",
+            snippet: "A mathematician.",
+          },
+          {
+            pageId: 1,
+            namespace: 0,
+            position: 3,
+            title: "Ada Lovelace",
+            snippet: "Duplicate variant result.",
+          },
+          {
+            pageId: 4,
+            namespace: 0,
+            position: 1,
+            title: "List of mathematicians",
+            snippet: "A list.",
+          },
+        ],
+        "Ada Lovelace",
+      ),
+      "Ada Lovelace",
+    );
+
+    expect(ranked[0]?.title).toBe("Ada Lovelace");
+    expect(ranked).toHaveLength(1);
+  });
+
+  it("filters blocked namespaces and keeps a disambiguation only as a last resort", () => {
     expect(
-      normalizeOrganicResults([
-        {
-          title: "Minimal result",
-          link: "https://example.com",
-        },
-        {
-          title: "Invalid URL is removed",
-          link: "javascript:alert(1)",
-        },
-        {
-          link: "https://no-title.example/result",
-        },
-      ]),
+      filterKnowledgeCandidates(
+        [
+          { pageId: 1, namespace: 1, position: 1, title: "Talk:Ada" },
+          { pageId: 2, namespace: 0, position: 2, title: "Category:People" },
+          {
+            pageId: 3,
+            namespace: 0,
+            position: 3,
+            title: "Ada (disambiguation)",
+            snippet: "may refer to",
+          },
+        ],
+        "Ada",
+      ),
     ).toEqual([
       {
-        title: "Minimal result",
-        url: "https://example.com/",
-      },
-      {
-        url: "https://no-title.example/result",
+        pageId: 3,
+        namespace: 0,
+        position: 3,
+        title: "Ada (disambiguation)",
+        snippet: "may refer to",
       },
     ]);
   });
 
-  it("filters invalid URLs and removes duplicate organic results", () => {
-    expect(
-      normalizeOrganicResults([
-        { position: 1, title: "First", link: "https://example.com" },
-        { position: 2, title: "Duplicate", link: "https://example.com/" },
-        { position: 3, title: "Unsafe", link: "file:///private/file" },
-        { position: 4, title: "Relative", link: "/relative" },
-      ]),
-    ).toEqual([{ position: 1, title: "First", url: "https://example.com/" }]);
+  it("strips search markup, decodes entities, and trims long snippets", () => {
+    const cleaned = cleanSearchText(
+      '<span class="searchmatch">Ada</span> &amp; mathematicians ' +
+        "with a very long explanation that should be shortened without exposing markup or entities.",
+    );
+    expect(cleaned).toContain("Ada & mathematicians");
+    expect(cleaned).not.toContain("searchmatch");
+    expect(cleaned?.length).toBeLessThanOrEqual(241);
   });
 
-  it("maps SerpApi error responses to a clean retryable error", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      serpApiResponse(
-        {
-          error: "Invalid API key",
-          search_metadata: { status: "Error" },
-        },
-        401,
-      ),
-    );
-    const provider = new SerpApiGoogleSearchProvider(
-      "server-only-serpapi-test-key",
-      fetchMock,
-      "https://serpapi.test/search",
-    );
-
-    await expect(provider.search("query", 1)).rejects.toMatchObject({
-      code: "WEB_SEARCH_PROVIDER_ERROR",
-      statusCode: 502,
-    });
-  });
-
-  it("maps SerpApi quota/rate-limit responses to a clean retryable error", async () => {
+  it("filters malformed page URLs without fabricating replacements", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
-        serpApiResponse({ error: "Monthly searches exhausted" }, 429),
-      );
-    const provider = new SerpApiGoogleSearchProvider(
-      "server-only-serpapi-test-key",
-      fetchMock,
-      "https://serpapi.test/search",
-    );
+      .mockImplementation(async (input) => {
+        const params = new URL(String(input)).searchParams;
+        return params.get("list") === "search"
+          ? jsonResponse({
+              query: {
+                search: [
+                  { pageid: 1, ns: 0, index: 1, title: "Safe" },
+                  { pageid: 2, ns: 0, index: 2, title: "Unsafe" },
+                ],
+              },
+            })
+          : jsonResponse({
+              query: {
+                pages: [
+                  {
+                    pageid: 1,
+                    title: "Safe",
+                    fullurl: "https://en.wikipedia.org/wiki/Safe",
+                  },
+                  {
+                    pageid: 2,
+                    title: "Unsafe",
+                    fullurl: "javascript:alert(1)",
+                  },
+                ],
+              },
+            });
+      });
+    const provider = new WikipediaKnowledgeSearchProvider(fetchMock);
 
-    await expect(provider.search("query", 1)).rejects.toMatchObject({
-      code: "WEB_SEARCH_PROVIDER_ERROR",
-      statusCode: 502,
+    await expect(provider.search("safe", 1)).resolves.toEqual({
+      results: [
+        expect.objectContaining({
+          title: "Safe",
+          url: "https://en.wikipedia.org/wiki/Safe",
+        }),
+      ],
     });
   });
 
-  it("maps invalid upstream JSON to a clean retryable error", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response("not json", {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const provider = new SerpApiGoogleSearchProvider(
-      "server-only-serpapi-test-key",
-      fetchMock,
-      "https://serpapi.test/search",
-    );
-
-    await expect(provider.search("query", 1)).rejects.toMatchObject({
-      code: "WEB_SEARCH_PROVIDER_ERROR",
-      statusCode: 502,
-    });
-  });
-
-  it("maps timeout/network failures to a clean retryable error", async () => {
+  it("returns an empty result for a valid empty Wikimedia response", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockRejectedValue(new Error("timed out"));
-    const provider = new SerpApiGoogleSearchProvider(
-      "server-only-serpapi-test-key",
-      fetchMock,
-      "https://serpapi.test/search",
-    );
+      .mockResolvedValue(jsonResponse({ query: { search: [] } }));
+    const provider = new WikipediaKnowledgeSearchProvider(fetchMock);
 
-    await expect(provider.search("query", 1)).rejects.toMatchObject({
-      code: "WEB_SEARCH_PROVIDER_ERROR",
-      statusCode: 502,
+    await expect(provider.search("nothing", 1)).resolves.toEqual({
+      results: [],
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns a configuration error when SerpApi is not configured", async () => {
-    const provider = createWebSearchProvider(undefined);
-
-    expect(provider).not.toBeInstanceOf(SerpApiGoogleSearchProvider);
-    await expect(provider.search("query", 1)).rejects.toMatchObject({
-      code: "WEB_SEARCH_NOT_CONFIGURED",
-      statusCode: 503,
-    });
+  it("maps upstream, invalid JSON, and timeout failures to a clean retryable error", async () => {
+    for (const fetchMock of [
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse({ error: { code: "bad" } }, 503)),
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("not json", { status: 200 })),
+      vi.fn<typeof fetch>().mockRejectedValue(new Error("timed out")),
+    ]) {
+      const provider = new WikipediaKnowledgeSearchProvider(fetchMock);
+      await expect(provider.search("query", 1)).rejects.toMatchObject({
+        code: "WEB_SEARCH_PROVIDER_ERROR",
+        statusCode: 502,
+      });
+    }
   });
 });
