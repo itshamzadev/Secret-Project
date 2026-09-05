@@ -31,10 +31,25 @@ export function mountAdminUi(app: Express): void {
     return;
   }
 
+  // Frontend assets are public. Admin authorization applies only to the
+  // /api/v1/admin router, never to the JavaScript or CSS needed to render its
+  // login page. Keep this mount before the SPA fallback so a missing/blocked
+  // asset cannot be replaced by index.html or another /admin handler.
+  app.use(
+    "/admin/assets",
+    express.static(path.join(directory, "assets"), {
+      index: false,
+    }),
+  );
   app.use("/admin", express.static(directory, { index: "index.html" }));
   app.use(
     "/admin",
     (request: Request, response: Response, next: NextFunction) => {
+      if (request.path === "/assets" || request.path.startsWith("/assets/")) {
+        next();
+        return;
+      }
+
       if (request.method !== "GET" && request.method !== "HEAD") {
         next();
         return;
