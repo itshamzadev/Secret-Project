@@ -14,6 +14,7 @@ import { initializeCallModels } from "./modules/calls/call.service.js";
 import { initializeNotificationModels } from "./modules/notifications/notification.service.js";
 import { initializeAdminModels } from "./modules/admin/admin.service.js";
 import { initializeMediaStorage } from "./modules/media/media.storage.js";
+import { initializeBlockModels } from "./modules/privacy/block.service.js";
 import { createSocketServer, type SocketRuntime } from "./sockets/index.js";
 
 const app = createApp();
@@ -70,6 +71,7 @@ export async function startServer(): Promise<void> {
     await initializePresenceModels();
     await initializeCallModels();
     await initializeNotificationModels();
+    await initializeBlockModels();
     await initializeAdminModels();
     await initializeMediaStorage();
     socketRuntime = await createSocketServer(httpServer);

@@ -15,6 +15,7 @@ import type {
   ConversationListQuery,
 } from "./conversation.validation.js";
 import type { ConversationDocument } from "./conversation.types.js";
+import { assertUsersCanInteract } from "../privacy/block.service.js";
 
 function conversationNotFound(): AppError {
   return new AppError({
@@ -48,6 +49,7 @@ export async function createOrGetDirectConversation(
       statusCode: 400,
     });
   }
+  await assertUsersCanInteract(context.userId, input.userId);
 
   const target = await UserModel.findOne({
     _id: targetId,
@@ -238,6 +240,107 @@ export async function getConversationParticipantIds(
       ),
     ),
   ];
+}
+
+export async function setConversationUnread(
+  context: AuthContext,
+  conversationId: string,
+  unread: boolean,
+): Promise<ConversationDocument> {
+  const conversation = await getOwnedConversation(context, conversationId);
+  const updated = await ConversationModel.findOneAndUpdate(
+    { _id: conversation._id },
+    {
+      $set: {
+        "participants.$[participant].manualUnread": unread,
+        ...(unread ? {} : { "participants.$[participant].unreadCount": 0 }),
+      },
+    },
+    {
+      arrayFilters: [{ "participant.userId": currentUserId(context) }],
+      returnDocument: "after",
+    },
+  ).exec();
+  if (updated === null) throw conversationNotFound();
+  return updated;
+}
+
+export async function clearConversationForUser(
+  context: AuthContext,
+  conversationId: string,
+): Promise<ConversationDocument> {
+  const conversation = await getOwnedConversation(context, conversationId);
+  const updated = await ConversationModel.findOneAndUpdate(
+    { _id: conversation._id },
+    {
+      $set: {
+        "participants.$[participant].clearedAt": new Date(),
+        "participants.$[participant].manualUnread": false,
+        "participants.$[participant].unreadCount": 0,
+      },
+    },
+    {
+      arrayFilters: [{ "participant.userId": currentUserId(context) }],
+      returnDocument: "after",
+    },
+  ).exec();
+  if (updated === null) throw conversationNotFound();
+  return updated;
+}
+
+export async function setConversationMute(
+  context: AuthContext,
+  conversationId: string,
+  duration: "8h" | "1w" | "always" | null,
+): Promise<ConversationDocument> {
+  const conversation = await getOwnedConversation(context, conversationId);
+  const mutedUntil =
+    duration === null
+      ? null
+      : duration === "always"
+        ? null
+        : new Date(
+            Date.now() + (duration === "8h" ? 8 : 24 * 7) * 60 * 60 * 1000,
+          );
+  const updated = await ConversationModel.findOneAndUpdate(
+    { _id: conversation._id },
+    {
+      $set: {
+        "participants.$[participant].mutedUntil": mutedUntil,
+        "participants.$[participant].muted": duration !== null,
+      },
+    },
+    {
+      arrayFilters: [{ "participant.userId": currentUserId(context) }],
+      returnDocument: "after",
+    },
+  ).exec();
+  if (updated === null) throw conversationNotFound();
+  return updated;
+}
+
+export async function isConversationMuted(
+  conversationId: string,
+  userId: string,
+): Promise<boolean> {
+  if (
+    !Types.ObjectId.isValid(conversationId) ||
+    !Types.ObjectId.isValid(userId)
+  ) {
+    return false;
+  }
+  const conversation = await ConversationModel.findOne({
+    _id: new Types.ObjectId(conversationId),
+  })
+    .select({ participants: 1 })
+    .exec();
+  const state = conversation?.participants.find(
+    (participant) => participant.userId.toString() === userId,
+  );
+  return (
+    state?.muted === true &&
+    (state.mutedUntil === null || state.mutedUntil.getTime() > Date.now())
+  );
 }
 
 export async function initializeConversationModels(): Promise<void> {

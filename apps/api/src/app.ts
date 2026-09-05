@@ -18,7 +18,10 @@ import type { HealthSnapshotProvider } from "./modules/health/health.types.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
 import { createContactRouter } from "./modules/contacts/contact.routes.js";
 import { createConversationRouter } from "./modules/conversations/conversation.routes.js";
-import { createMessageRouter } from "./modules/messages/message.routes.js";
+import {
+  createMessageActionRouter,
+  createMessageRouter,
+} from "./modules/messages/message.routes.js";
 import { createUserRouter } from "./modules/users/user.routes.js";
 import { createCallRouter } from "./modules/calls/call.routes.js";
 import { createNotificationRouter } from "./modules/notifications/notification.routes.js";
@@ -94,6 +97,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/contacts", createContactRouter());
   apiV1Router.use("/conversations", createConversationRouter());
   apiV1Router.use("/conversations", createMessageRouter());
+  apiV1Router.use("/messages", createMessageActionRouter());
   apiV1Router.use("/users", createUserRouter());
   apiV1Router.use("/calls", createCallRouter());
   apiV1Router.use("/notifications", createNotificationRouter());

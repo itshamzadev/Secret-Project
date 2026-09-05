@@ -10,6 +10,8 @@ import {
   disablePushTokens,
 } from "./notification.service.js";
 import type { CallDocument } from "../calls/call.types.js";
+import { isConversationMuted } from "../conversations/conversation.service.js";
+import { isUserBlockedEitherDirection } from "../privacy/block.service.js";
 
 interface ExpoPushMessage {
   to: string;
@@ -559,6 +561,18 @@ export async function dispatchNewDirectMessage(
   const deduplicationKey = `terqivo:push:message:${input.message.id}`;
   try {
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
+      if (
+        (await isUserBlockedEitherDirection(
+          input.senderId,
+          input.recipientId,
+        )) ||
+        (await isConversationMuted(
+          input.message.conversationId,
+          input.recipientId,
+        ))
+      ) {
+        return;
+      }
       const [devices, sender] = await Promise.all([
         getEnabledPushDevices(input.recipientId),
         getUserById(input.senderId),
@@ -600,6 +614,14 @@ export async function dispatchIncomingCallNotification(
   const deduplicationKey = `terqivo:push:call:${call._id.toString()}`;
   try {
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
+      if (
+        await isUserBlockedEitherDirection(
+          call.callerId.toString(),
+          call.calleeId.toString(),
+        )
+      ) {
+        return;
+      }
       const devices = await getEnabledPushDevices(call.calleeId.toString());
       logger.info(
         {
@@ -634,6 +656,14 @@ export async function dispatchMissedCallNotification(
   const deduplicationKey = `terqivo:push:missed-call:${call._id.toString()}`;
   try {
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
+      if (
+        await isUserBlockedEitherDirection(
+          call.callerId.toString(),
+          call.calleeId.toString(),
+        )
+      ) {
+        return;
+      }
       const [devices, caller] = await Promise.all([
         getEnabledPushDevices(call.calleeId.toString()),
         getUserById(call.callerId.toString()),

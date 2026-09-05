@@ -132,4 +132,161 @@ describe("direct conversations and messages", () => {
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("CONVERSATION_NOT_FOUND");
   });
+
+  it("persists one reaction per user and limits reaction changes to participants", async () => {
+    const alice = authData(await register());
+    const bob = authData(
+      await register({
+        username: "Bob.Reactions",
+        name: "Bob Reactions",
+        phone: "+14155550102",
+        email: "bob-reactions@example.com",
+      }),
+    );
+    const charlie = authData(
+      await register({
+        username: "Charlie.Reactions",
+        name: "Charlie Reactions",
+        phone: "+14155550103",
+        email: "charlie-reactions@example.com",
+      }),
+    );
+    const created = await request(app)
+      .post("/api/v1/conversations/direct")
+      .set(authHeader(alice.accessToken))
+      .send({ userId: bob.user.id });
+    const conversationId = created.body.data.conversation.id as string;
+    const sent = await request(app)
+      .post(`/api/v1/conversations/${conversationId}/messages`)
+      .set(authHeader(alice.accessToken))
+      .send({
+        clientMessageId: "reaction-message-1",
+        type: "text",
+        text: "React to me",
+      });
+    const messageId = sent.body.data.message.id as string;
+
+    const first = await request(app)
+      .put(`/api/v1/messages/${messageId}/reaction`)
+      .set(authHeader(bob.accessToken))
+      .send({ emoji: "❤️" });
+    const replaced = await request(app)
+      .put(`/api/v1/messages/${messageId}/reaction`)
+      .set(authHeader(bob.accessToken))
+      .send({ emoji: "👍" });
+    const removed = await request(app)
+      .delete(`/api/v1/messages/${messageId}/reaction`)
+      .set(authHeader(bob.accessToken));
+    const forbidden = await request(app)
+      .put(`/api/v1/messages/${messageId}/reaction`)
+      .set(authHeader(charlie.accessToken))
+      .send({ emoji: "😂" });
+
+    expect(first.status).toBe(200);
+    expect(first.body.data.message.reactions).toHaveLength(1);
+    expect(first.body.data.message.reactions[0].emoji).toBe("❤️");
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.data.message.reactions).toHaveLength(1);
+    expect(replaced.body.data.message.reactions[0].emoji).toBe("👍");
+    expect(removed.status).toBe(200);
+    expect(removed.body.data.message.reactions).toEqual([]);
+    expect(forbidden.status).toBe(404);
+  });
+
+  it("clears history and mute state for one participant only", async () => {
+    const alice = authData(await register());
+    const bob = authData(
+      await register({
+        username: "Bob.Actions",
+        name: "Bob Actions",
+        phone: "+14155550102",
+        email: "bob-actions@example.com",
+      }),
+    );
+    const created = await request(app)
+      .post("/api/v1/conversations/direct")
+      .set(authHeader(alice.accessToken))
+      .send({ userId: bob.user.id });
+    const conversationId = created.body.data.conversation.id as string;
+    await request(app)
+      .post(`/api/v1/conversations/${conversationId}/messages`)
+      .set(authHeader(alice.accessToken))
+      .send({
+        clientMessageId: "actions-message-1",
+        type: "text",
+        text: "Keep this private to the other participant",
+      });
+
+    const mute = await request(app)
+      .put(`/api/v1/conversations/${conversationId}/mute`)
+      .set(authHeader(bob.accessToken))
+      .send({ duration: "8h" });
+    const clear = await request(app)
+      .post(`/api/v1/conversations/${conversationId}/clear`)
+      .set(authHeader(bob.accessToken));
+    const bobHistory = await request(app)
+      .get(`/api/v1/conversations/${conversationId}/messages`)
+      .set(authHeader(bob.accessToken));
+    const aliceHistory = await request(app)
+      .get(`/api/v1/conversations/${conversationId}/messages`)
+      .set(authHeader(alice.accessToken));
+    const bobList = await request(app)
+      .get("/api/v1/conversations")
+      .set(authHeader(bob.accessToken));
+    const aliceList = await request(app)
+      .get("/api/v1/conversations")
+      .set(authHeader(alice.accessToken));
+
+    expect(mute.status).toBe(200);
+    expect(clear.status).toBe(200);
+    expect(bobHistory.body.data.messages).toEqual([]);
+    expect(aliceHistory.body.data.messages).toHaveLength(1);
+    expect(bobList.body.data.conversations[0]).toMatchObject({
+      muted: true,
+      lastMessage: null,
+    });
+    expect(aliceList.body.data.conversations[0].lastMessage.text).toBe(
+      "Keep this private to the other participant",
+    );
+  });
+
+  it("enforces a direct-user block for new messages and conversations", async () => {
+    const alice = authData(await register());
+    const bob = authData(
+      await register({
+        username: "Bob.Blocked",
+        name: "Bob Blocked",
+        phone: "+14155550102",
+        email: "bob-blocked@example.com",
+      }),
+    );
+    const created = await request(app)
+      .post("/api/v1/conversations/direct")
+      .set(authHeader(alice.accessToken))
+      .send({ userId: bob.user.id });
+    const conversationId = created.body.data.conversation.id as string;
+    const blocked = await request(app)
+      .put(`/api/v1/users/${bob.user.id}/block`)
+      .set(authHeader(alice.accessToken));
+    const message = await request(app)
+      .post(`/api/v1/conversations/${conversationId}/messages`)
+      .set(authHeader(alice.accessToken))
+      .send({
+        clientMessageId: "blocked-message-1",
+        type: "text",
+        text: "This should not send",
+      });
+    const newConversation = await request(app)
+      .post("/api/v1/conversations/direct")
+      .set(authHeader(bob.accessToken))
+      .send({ userId: alice.user.id });
+    const unblocked = await request(app)
+      .delete(`/api/v1/users/${bob.user.id}/block`)
+      .set(authHeader(alice.accessToken));
+
+    expect(blocked.status).toBe(200);
+    expect(message.status).toBe(403);
+    expect(newConversation.status).toBe(403);
+    expect(unblocked.status).toBe(200);
+  });
 });

@@ -1,3 +1,4 @@
+import { messageReactionEmojis } from "@terqivo/contracts";
 import { z } from "zod";
 
 import { objectIdSchema } from "../../utils/identifiers.js";
@@ -24,6 +25,10 @@ export const messageIdParamsSchema = z.object({
 
 export const messageReadSchema = z.object({
   lastReadMessageId: objectIdSchema,
+});
+
+export const messageReactionSchema = z.object({
+  emoji: z.enum(messageReactionEmojis),
 });
 
 export const conversationMessageParamsSchema = z.object({
@@ -53,4 +58,5 @@ export const socketReadSchema = z.object({
 export type MessageTextInput = z.infer<typeof messageTextSchema>;
 export type MessageHistoryQuery = z.infer<typeof messageHistoryQuerySchema>;
 export type MessageReadInput = z.infer<typeof messageReadSchema>;
+export type MessageReactionInput = z.infer<typeof messageReactionSchema>;
 export type SocketMessageSendInput = z.infer<typeof socketMessageSendSchema>;

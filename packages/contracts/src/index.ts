@@ -89,6 +89,16 @@ export const messageTypes = [
 ] as const;
 export type MessageType = (typeof messageTypes)[number];
 
+export const messageReactionEmojis = [
+  "❤️",
+  "😂",
+  "😮",
+  "😢",
+  "👍",
+  "🙏",
+] as const;
+export type MessageReactionEmoji = (typeof messageReactionEmojis)[number];
+
 export interface MediaUploadMetadata {
   mimeType: string;
   size: number;
@@ -104,6 +114,16 @@ export interface MessageMediaDto extends MediaUploadMetadata {
   thumbnailUrl: string | null;
 }
 
+export interface MessageReactionDto {
+  userId: string;
+  emoji: MessageReactionEmoji;
+  reactedAt: string;
+}
+
+export interface MessageReactionUpdatedEvent {
+  message: MessageDto;
+}
+
 export interface MessageDto {
   id: string;
   conversationId: string;
@@ -112,6 +132,7 @@ export interface MessageDto {
   type: MessageType;
   text: string | null;
   media: MessageMediaDto | null;
+  reactions: MessageReactionDto[];
   sequence: number;
   status: "sent" | "delivered" | "read";
   createdAt: string;
@@ -130,6 +151,10 @@ export interface ConversationDto {
   lastMessage: MessageDto | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  mutedUntil: string | null;
+  muted: boolean;
+  manualUnread: boolean;
+  clearedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

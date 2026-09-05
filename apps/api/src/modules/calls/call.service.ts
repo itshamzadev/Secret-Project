@@ -16,6 +16,7 @@ import { iceServers } from "./call.config.js";
 import { toCallDto, toCallSignalDto } from "./call.dto.js";
 import type { CallDocument } from "./call.types.js";
 import type { CallHistoryQuery, CallStartInput } from "./call.validation.js";
+import { assertUsersCanInteract } from "../privacy/block.service.js";
 
 const activeCallStatuses: CallStatus[] = ["ringing", "accepted"];
 const terminalCallStatuses: CallStatus[] = [
@@ -230,6 +231,7 @@ export async function startCall(
   if (callee === null || callee.accountStatus !== "active") {
     throw targetUnavailable();
   }
+  await assertUsersCanInteract(context.userId, input.calleeId);
 
   const existing = await CallModel.findOne({
     $or: [
@@ -313,6 +315,10 @@ export async function acceptCall(
   if (call.calleeId.toString() !== context.userId) {
     throw callForbidden();
   }
+  await assertUsersCanInteract(
+    call.callerId.toString(),
+    call.calleeId.toString(),
+  );
   if (call.status === "accepted") {
     return { call, changed: false };
   }
@@ -518,6 +524,10 @@ export async function assertSignalingAllowed(
   if (call.status !== "accepted") {
     throw signalingUnavailable();
   }
+  await assertUsersCanInteract(
+    call.callerId.toString(),
+    call.calleeId.toString(),
+  );
   const otherUserId =
     call.callerId.toString() === context.userId
       ? call.calleeId.toString()

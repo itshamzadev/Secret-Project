@@ -10,6 +10,10 @@ export interface ConversationParticipant {
   lastReadSequence: number;
   lastReadAt: Date | null;
   unreadCount: number;
+  mutedUntil: Date | null;
+  muted: boolean;
+  manualUnread: boolean;
+  clearedAt: Date | null;
 }
 
 export interface ConversationEntity {

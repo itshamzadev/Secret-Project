@@ -19,6 +19,8 @@ import { initializeCallModels } from "../src/modules/calls/call.service.js";
 import { callTimeoutKeys } from "../src/modules/calls/call-timeouts.js";
 import { PushDeviceModel } from "../src/modules/notifications/push-device.model.js";
 import { initializeNotificationModels } from "../src/modules/notifications/notification.service.js";
+import { UserBlockModel } from "../src/modules/privacy/block.model.js";
+import { initializeBlockModels } from "../src/modules/privacy/block.service.js";
 
 export interface TestRegisterPayload {
   username: string;
@@ -84,6 +86,7 @@ export async function connectTestData(): Promise<void> {
   await initializePresenceModels();
   await initializeCallModels();
   await initializeNotificationModels();
+  await initializeBlockModels();
 }
 
 export async function clearTestData(): Promise<void> {
@@ -96,6 +99,7 @@ export async function clearTestData(): Promise<void> {
     CallModel.deleteMany({}),
     PushDeviceModel.deleteMany({}),
     UserModel.deleteMany({}),
+    UserBlockModel.deleteMany({}),
   ]);
   if (redisClient.isReady) {
     await redisClient.del(callTimeoutKeys.timeoutSetKey);

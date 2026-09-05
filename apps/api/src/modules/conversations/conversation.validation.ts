@@ -15,7 +15,17 @@ export const conversationListQuerySchema = z.object({
   cursor: z.string().trim().min(1).max(512).optional(),
 });
 
+export const conversationUnreadSchema = z.object({
+  unread: z.boolean(),
+});
+
+export const conversationMuteSchema = z.object({
+  duration: z.enum(["8h", "1w", "always"]),
+});
+
 export type CreateDirectConversationInput = z.infer<
   typeof createDirectConversationSchema
 >;
 export type ConversationListQuery = z.infer<typeof conversationListQuerySchema>;
+export type ConversationUnreadInput = z.infer<typeof conversationUnreadSchema>;
+export type ConversationMuteInput = z.infer<typeof conversationMuteSchema>;

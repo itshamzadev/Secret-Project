@@ -20,6 +20,9 @@ import type {
   MessageTextInput,
 } from "./message.validation.js";
 import type { MessageDocument } from "./message.types.js";
+import type { MessageReactionInput } from "./message.validation.js";
+import { publishMessageReactionUpdated } from "./message.events.js";
+import { assertUsersCanInteract } from "../privacy/block.service.js";
 
 function messageNotFound(): AppError {
   return new AppError({
@@ -79,6 +82,7 @@ export async function sendTextMessage(
 
   const conversation = await getOwnedConversation(context, conversationId);
   const recipientId = getOtherParticipant(conversation, context.userId);
+  await assertUsersCanInteract(context.userId, recipientId.toString());
   const updatedConversation = await ConversationModel.findOneAndUpdate(
     {
       _id: conversation._id,
@@ -194,6 +198,7 @@ export async function sendMediaMessage(
 
   const conversation = await getOwnedConversation(context, conversationId);
   const recipientId = getOtherParticipant(conversation, context.userId);
+  await assertUsersCanInteract(context.userId, recipientId.toString());
   const updatedConversation = await ConversationModel.findOneAndUpdate(
     {
       _id: conversation._id,
@@ -285,6 +290,16 @@ export async function getMessageHistory(
   const filter: Record<string, unknown> = {
     conversationId: conversation._id,
   };
+  const participantState = conversation.participants.find(
+    (participant) => participant.userId.toString() === context.userId,
+  );
+  const historyClauses: Record<string, unknown>[] = [];
+  if (
+    participantState?.clearedAt !== null &&
+    participantState?.clearedAt !== undefined
+  ) {
+    historyClauses.push({ createdAt: { $gt: participantState.clearedAt } });
+  }
   if (cursor !== null) {
     const cursorDate = new Date(cursor.createdAt);
     if (
@@ -297,10 +312,17 @@ export async function getMessageHistory(
         statusCode: 400,
       });
     }
-    filter.$or = [
-      { createdAt: { $lt: cursorDate } },
-      { createdAt: cursorDate, _id: { $lt: new Types.ObjectId(cursor.id) } },
-    ];
+    historyClauses.push({
+      $or: [
+        { createdAt: { $lt: cursorDate } },
+        { createdAt: cursorDate, _id: { $lt: new Types.ObjectId(cursor.id) } },
+      ],
+    });
+  }
+  if (historyClauses.length === 1) {
+    Object.assign(filter, historyClauses[0]);
+  } else if (historyClauses.length > 1) {
+    filter.$and = historyClauses;
   }
 
   const messages = await MessageModel.find(filter)
@@ -322,6 +344,44 @@ export async function getMessageHistory(
           })
         : null,
   };
+}
+
+export async function updateMessageReaction(
+  context: AuthContext,
+  messageId: string,
+  input: MessageReactionInput | null,
+): Promise<MessageDto> {
+  if (!Types.ObjectId.isValid(messageId)) throw messageNotFound();
+  const message = await MessageModel.findById(messageId).exec();
+  if (message === null) throw messageNotFound();
+  const conversation = await getOwnedConversation(
+    context,
+    message.conversationId.toString(),
+  );
+  const userId = new Types.ObjectId(context.userId);
+  const reactions = (message.reactions ?? []).filter(
+    (reaction) => !reaction.userId.equals(userId),
+  );
+  if (input !== null) {
+    reactions.push({
+      userId,
+      emoji: input.emoji,
+      reactedAt: new Date(),
+    });
+  }
+  message.reactions = reactions;
+  await message.save();
+  const dto = toMessageDto(message, conversation, context.userId);
+  const recipientId = getOtherParticipant(
+    conversation,
+    context.userId,
+  ).toString();
+  publishMessageReactionUpdated({
+    message: dto,
+    recipientId,
+    senderId: context.userId,
+  });
+  return dto;
 }
 
 export interface DeliveryReceipt {
@@ -445,6 +505,7 @@ export async function markConversationRead(
           "participants.$[reader].lastReadSequence": message.sequence,
           "participants.$[reader].lastReadAt": readAt,
           "participants.$[reader].unreadCount": unreadCount,
+          "participants.$[reader].manualUnread": false,
         },
       },
       {

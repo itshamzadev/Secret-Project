@@ -50,6 +50,10 @@ const participantSchema = new Schema<ConversationParticipant>(
       default: 0,
       min: 0,
     },
+    mutedUntil: { type: Date, default: null },
+    muted: { type: Boolean, default: false },
+    manualUnread: { type: Boolean, default: false },
+    clearedAt: { type: Date, default: null },
   },
   { _id: false },
 );

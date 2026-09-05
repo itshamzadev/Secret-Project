@@ -23,7 +23,10 @@ export function toConversationDto(
     (value) => value.userId.toString() === currentUserId,
   );
   const message: MessageDto | null =
-    lastMessage === null || participantState === undefined
+    lastMessage === null ||
+    participantState === undefined ||
+    (participantState.clearedAt !== null &&
+      lastMessage.createdAt <= participantState.clearedAt)
       ? null
       : toMessageDto(lastMessage, conversation, currentUserId);
 
@@ -35,8 +38,15 @@ export function toConversationDto(
       customName: contact?.customName ?? null,
     },
     lastMessage: message,
-    lastMessageAt: conversation.lastMessageAt?.toISOString() ?? null,
+    lastMessageAt:
+      message === null
+        ? null
+        : (conversation.lastMessageAt?.toISOString() ?? null),
     unreadCount: participantState?.unreadCount ?? 0,
+    mutedUntil: participantState?.mutedUntil?.toISOString() ?? null,
+    muted: participantState?.muted ?? false,
+    manualUnread: participantState?.manualUnread ?? false,
+    clearedAt: participantState?.clearedAt?.toISOString() ?? null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

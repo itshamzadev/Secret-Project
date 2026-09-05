@@ -1,6 +1,16 @@
 import type { HydratedDocument, Types } from "mongoose";
 
-import type { MessageMediaDto, MessageType } from "@terqivo/contracts";
+import type {
+  MessageMediaDto,
+  MessageReactionEmoji,
+  MessageType,
+} from "@terqivo/contracts";
+
+export interface MessageReactionEntity {
+  userId: Types.ObjectId;
+  emoji: MessageReactionEmoji;
+  reactedAt: Date;
+}
 
 export interface MessageEntity {
   conversationId: Types.ObjectId;
@@ -9,6 +19,7 @@ export interface MessageEntity {
   type: MessageType;
   text: string | null;
   media: MessageMediaDto | null;
+  reactions: MessageReactionEntity[];
   replyToMessageId: Types.ObjectId | null;
   sequence: number;
   createdAt: Date;

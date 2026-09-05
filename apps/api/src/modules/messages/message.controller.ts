@@ -5,12 +5,15 @@ import {
   conversationMessageParamsSchema,
   messageHistoryQuerySchema,
   messageReadSchema,
+  messageIdParamsSchema,
+  messageReactionSchema,
   messageTextSchema,
 } from "./message.validation.js";
 import {
   getMessageHistory,
   markConversationRead,
   sendTextMessage,
+  updateMessageReaction,
 } from "./message.service.js";
 
 function controller(
@@ -70,7 +73,37 @@ const handleRead = async (
   response.status(200).json({ success: true, data: { receipt: result } });
 };
 
+const handleReaction = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const message = await updateMessageReaction(
+    requireAuthContext(request),
+    messageId,
+    messageReactionSchema.parse(request.body),
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
+const handleRemoveReaction = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const message = await updateMessageReaction(
+    requireAuthContext(request),
+    messageId,
+    null,
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
 export const sendMessageController: RequestHandler = controller(handleSend);
 export const messageHistoryController: RequestHandler =
   controller(handleHistory);
 export const markReadController: RequestHandler = controller(handleRead);
+export const updateReactionController: RequestHandler =
+  controller(handleReaction);
+export const removeReactionController: RequestHandler =
+  controller(handleRemoveReaction);

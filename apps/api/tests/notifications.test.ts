@@ -167,6 +167,7 @@ describe("push notification devices and payloads", () => {
       status: "sent" as const,
       createdAt: "2026-09-02T00:00:00.000Z",
       updatedAt: "2026-09-02T00:00:00.000Z",
+      reactions: [],
     };
     const messagePush = buildMessagePushPayload("ExponentPushToken[test]", {
       message,

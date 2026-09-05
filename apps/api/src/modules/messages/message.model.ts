@@ -2,6 +2,19 @@ import { model, Schema } from "mongoose";
 
 import type { MessageEntity } from "./message.types.js";
 
+const reactionSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    emoji: {
+      type: String,
+      enum: ["❤️", "😂", "😮", "😢", "👍", "🙏"],
+      required: true,
+    },
+    reactedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
+
 const mediaSchema = new Schema(
   {
     url: { type: String, required: true },
@@ -48,6 +61,7 @@ const messageSchema = new Schema<MessageEntity>(
       maxlength: 4000,
     },
     media: { type: mediaSchema, default: null },
+    reactions: { type: [reactionSchema], default: [] },
     replyToMessageId: {
       type: Schema.Types.ObjectId,
       ref: "Message",

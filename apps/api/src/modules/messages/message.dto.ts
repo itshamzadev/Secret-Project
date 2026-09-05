@@ -55,6 +55,11 @@ export function toMessageDto(
     type: message.type,
     text: message.text,
     media: message.media ?? null,
+    reactions: (message.reactions ?? []).map((reaction) => ({
+      userId: reaction.userId.toString(),
+      emoji: reaction.emoji,
+      reactedAt: reaction.reactedAt.toISOString(),
+    })),
     sequence: message.sequence,
     status: getMessageStatus(message, conversation, currentUserId),
     createdAt: message.createdAt.toISOString(),
