@@ -3,7 +3,11 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 import { env } from "../../config/env.js";
 import { authenticate } from "../../middleware/authenticate.js";
-import { aiQueryController } from "./ai.controller.js";
+import {
+  aiModelsController,
+  aiQueryController,
+  aiStreamController,
+} from "./ai.controller.js";
 
 const aiRateLimiter = rateLimit({
   windowMs: 60 * 1_000,
@@ -24,6 +28,8 @@ const aiRateLimiter = rateLimit({
 export function createAiRouter(): Router {
   const router = Router();
   router.use(authenticate);
+  router.get("/models", aiModelsController);
   router.post("/query", aiRateLimiter, aiQueryController);
+  router.post("/query/stream", aiRateLimiter, aiStreamController);
   return router;
 }

@@ -200,14 +200,60 @@ export interface WebSearchResponseData {
   results: WebSearchResultDto[];
 }
 
+export const aiModelIds = [
+  "gemini-native-audio",
+  "gemini-flash",
+  "terqivo-ai",
+] as const;
+
+export type AiModelId = (typeof aiModelIds)[number];
+
+export interface AiModelOption {
+  id: AiModelId;
+  label: string;
+  description: string;
+}
+
+export const aiModelOptions: readonly AiModelOption[] = [
+  {
+    id: "terqivo-ai",
+    label: "Terqivo AI",
+    description:
+      "Terqivo's optimized AI assistant for fast, reliable responses.",
+  },
+  {
+    id: "gemini-flash",
+    label: "Gemini 2.5 Flash",
+    description: "Direct Gemini text generation for general questions.",
+  },
+  {
+    id: "gemini-native-audio",
+    label: "Gemini 2.5 Flash Native Audio",
+    description: "The existing native-audio model slot for voice experiences.",
+  },
+];
+
+export type AiRequestState =
+  "queued" | "processing" | "streaming" | "completed" | "failed" | "cancelled";
+
 export interface AiQueryRequest {
   query: string;
+  modelId?: AiModelId;
+  requestId?: string;
+  conversationId?: string;
 }
 
 export interface AiResponseData {
   answer: string;
-  model: string;
+  model: AiModelId;
   grounded: boolean;
+  route: "local" | "gemini" | "child";
+  requestId: string;
+  state: Extract<AiRequestState, "completed">;
+}
+
+export interface AiModelOptionsData {
+  models: readonly AiModelOption[];
 }
 
 export interface SocketMessageEvent {
