@@ -188,10 +188,14 @@ export interface SocketMessageSendInput {
 }
 
 export interface WebSearchResultDto {
+  position?: number;
   title?: string;
   snippet?: string;
   url: string;
-  source: string;
+  displayUrl?: string;
+  source?: string;
+  favicon?: string;
+  thumbnail?: string;
 }
 
 export interface WebSearchSourceDto {
@@ -201,10 +205,9 @@ export interface WebSearchSourceDto {
 
 export interface WebSearchResponseData {
   query: string;
-  answer: string;
   provider: "google";
+  page: number;
   results: WebSearchResultDto[];
-  sources: WebSearchSourceDto[];
 }
 
 export const aiModelIds = [

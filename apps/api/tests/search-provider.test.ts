@@ -1,99 +1,192 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type {
-  AiProvider,
-  AiProviderInput,
-  AiProviderResult,
-} from "../src/modules/ai/ai.provider.js";
 import {
   createWebSearchProvider,
-  normalizeResults,
+  normalizeOrganicResults,
+  SerpApiGoogleSearchProvider,
 } from "../src/modules/search/search.provider.js";
 
-class FakeGeminiProvider implements AiProvider {
-  public readonly inputs: AiProviderInput[] = [];
-  public shouldFail = false;
-
-  public async generate(input: AiProviderInput): Promise<AiProviderResult> {
-    this.inputs.push(input);
-    if (this.shouldFail) throw new Error("provider unavailable");
-    return {
-      answer: "Grounded answer",
-      providerModel: "test-model",
-      grounded: true,
-      sources: [
-        {
-          title: "Example",
-          snippet: "A real citation snippet.",
-          url: "https://example.com/article",
-          source: "example.com",
-        },
-        {
-          title: "Duplicate",
-          url: "https://example.com/article",
-          source: "example.com",
-        },
-      ],
-    };
-  }
-
-  public async *stream(
-    _input: AiProviderInput,
-  ): AsyncGenerator<string, void, undefined> {
-    yield "unused";
-  }
+function serpApiResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
-describe("Google-grounded web search provider", () => {
-  it("uses Gemini with the built-in Google Search tool", async () => {
-    const gemini = new FakeGeminiProvider();
-    const provider = createWebSearchProvider(gemini);
+describe("SerpApi Google web search provider", () => {
+  it("calls SerpApi with Google, the query, and the requested page", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      serpApiResponse({
+        search_metadata: { status: "Success" },
+        organic_results: [
+          {
+            position: 1,
+            title: "Example result",
+            link: "https://example.com/article",
+            displayed_link: "example.com › article",
+            source: "Example",
+            snippet: "A useful result.",
+            favicon: "https://example.com/favicon.ico",
+            thumbnail: "https://example.com/image.jpg",
+          },
+        ],
+      }),
+    );
+    const provider = new SerpApiGoogleSearchProvider(
+      "server-only-serpapi-test-key",
+      fetchMock,
+      "https://serpapi.test/search",
+    );
 
-    await expect(provider.search("latest AI news")).resolves.toMatchObject({
-      answer: "Grounded answer",
-      sources: [{ url: "https://example.com/article" }],
+    await expect(provider.search(" latest AI news ", 2)).resolves.toEqual({
       results: [
         {
-          title: "Example",
-          snippet: "A real citation snippet.",
+          position: 1,
+          title: "Example result",
           url: "https://example.com/article",
-          source: "example.com",
+          displayUrl: "example.com › article",
+          source: "Example",
+          snippet: "A useful result.",
+          favicon: "https://example.com/favicon.ico",
+          thumbnail: "https://example.com/image.jpg",
         },
       ],
     });
-    expect(gemini.inputs).toHaveLength(1);
-    expect(gemini.inputs[0]?.googleSearch).toBe(true);
+
+    const requestUrl = String(fetchMock.mock.calls[0]?.[0]);
+    const params = new URL(requestUrl).searchParams;
+    expect(params.get("engine")).toBe("google");
+    expect(params.get("q")).toBe(" latest AI news ");
+    expect(params.get("api_key")).toBe("server-only-serpapi-test-key");
+    expect(params.get("output")).toBe("json");
+    expect(params.get("google_domain")).toBe("google.com");
+    expect(params.get("hl")).toBe("en");
+    expect(params.get("gl")).toBe("pk");
+    expect(params.get("start")).toBe("10");
+    expect(JSON.stringify({ results: [] })).not.toContain(
+      "server-only-serpapi-test-key",
+    );
   });
 
-  it("drops malformed URLs and never fabricates source URLs", () => {
+  it("maps organic results without requiring optional fields", () => {
     expect(
-      normalizeResults([
-        { title: "Safe", url: "https://example.com", source: "example.com" },
-        { title: "Unsafe", url: "javascript:alert(1)", source: "unsafe" },
-        { title: "Missing", url: "not-a-url", source: "missing" },
+      normalizeOrganicResults([
+        {
+          title: "Minimal result",
+          link: "https://example.com",
+        },
+        {
+          title: "Invalid URL is removed",
+          link: "javascript:alert(1)",
+        },
+        {
+          link: "https://no-title.example/result",
+        },
       ]),
     ).toEqual([
-      { title: "Safe", url: "https://example.com/", source: "example.com" },
+      {
+        title: "Minimal result",
+        url: "https://example.com/",
+      },
+      {
+        url: "https://no-title.example/result",
+      },
     ]);
   });
 
-  it("does not expose a fallback provider when Gemini is unavailable", async () => {
-    const provider = createWebSearchProvider(null);
-    expect(provider.name).toBe("google");
-    await expect(provider.search("outage")).rejects.toMatchObject({
-      code: "WEB_SEARCH_NOT_CONFIGURED",
-      statusCode: 503,
+  it("filters invalid URLs and removes duplicate organic results", () => {
+    expect(
+      normalizeOrganicResults([
+        { position: 1, title: "First", link: "https://example.com" },
+        { position: 2, title: "Duplicate", link: "https://example.com/" },
+        { position: 3, title: "Unsafe", link: "file:///private/file" },
+        { position: 4, title: "Relative", link: "/relative" },
+      ]),
+    ).toEqual([{ position: 1, title: "First", url: "https://example.com/" }]);
+  });
+
+  it("maps SerpApi error responses to a clean retryable error", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      serpApiResponse(
+        {
+          error: "Invalid API key",
+          search_metadata: { status: "Error" },
+        },
+        401,
+      ),
+    );
+    const provider = new SerpApiGoogleSearchProvider(
+      "server-only-serpapi-test-key",
+      fetchMock,
+      "https://serpapi.test/search",
+    );
+
+    await expect(provider.search("query", 1)).rejects.toMatchObject({
+      code: "WEB_SEARCH_PROVIDER_ERROR",
+      statusCode: 502,
     });
   });
 
-  it("returns a retryable error when Gemini search fails", async () => {
-    const gemini = new FakeGeminiProvider();
-    gemini.shouldFail = true;
-    await expect(
-      createWebSearchProvider(gemini).search("outage"),
-    ).rejects.toMatchObject({
+  it("maps SerpApi quota/rate-limit responses to a clean retryable error", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        serpApiResponse({ error: "Monthly searches exhausted" }, 429),
+      );
+    const provider = new SerpApiGoogleSearchProvider(
+      "server-only-serpapi-test-key",
+      fetchMock,
+      "https://serpapi.test/search",
+    );
+
+    await expect(provider.search("query", 1)).rejects.toMatchObject({
       code: "WEB_SEARCH_PROVIDER_ERROR",
       statusCode: 502,
+    });
+  });
+
+  it("maps invalid upstream JSON to a clean retryable error", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("not json", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const provider = new SerpApiGoogleSearchProvider(
+      "server-only-serpapi-test-key",
+      fetchMock,
+      "https://serpapi.test/search",
+    );
+
+    await expect(provider.search("query", 1)).rejects.toMatchObject({
+      code: "WEB_SEARCH_PROVIDER_ERROR",
+      statusCode: 502,
+    });
+  });
+
+  it("maps timeout/network failures to a clean retryable error", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error("timed out"));
+    const provider = new SerpApiGoogleSearchProvider(
+      "server-only-serpapi-test-key",
+      fetchMock,
+      "https://serpapi.test/search",
+    );
+
+    await expect(provider.search("query", 1)).rejects.toMatchObject({
+      code: "WEB_SEARCH_PROVIDER_ERROR",
+      statusCode: 502,
+    });
+  });
+
+  it("returns a configuration error when SerpApi is not configured", async () => {
+    const provider = createWebSearchProvider(undefined);
+
+    expect(provider).not.toBeInstanceOf(SerpApiGoogleSearchProvider);
+    await expect(provider.search("query", 1)).rejects.toMatchObject({
+      code: "WEB_SEARCH_NOT_CONFIGURED",
+      statusCode: 503,
     });
   });
 });

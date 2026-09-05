@@ -99,6 +99,11 @@ const environmentSchema = z.object({
     .max(250 * 1024 * 1024)
     .default(50 * 1024 * 1024),
   SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
+  SERPAPI_API_KEY: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(1).optional(),
+  ),
   GEMINI_API_KEY: z.preprocess(
     (value) =>
       typeof value === "string" && value.trim() === "" ? undefined : value,
