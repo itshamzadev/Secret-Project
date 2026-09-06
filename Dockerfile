@@ -4,6 +4,12 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 
+# redis-memory-server runs its native postinstall during the workspace install.
+# Keep the slim image, but provide the minimum Debian build toolchain it needs.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/admin-ui/package.json ./apps/admin-ui/package.json
