@@ -6,6 +6,9 @@ import { decodeCursor, encodeCursor } from "../../utils/cursors.js";
 import { isMongoDuplicateKeyError } from "../../utils/mongo.js";
 import { ContactModel } from "../contacts/contact.model.js";
 import { MessageModel } from "../messages/message.model.js";
+import type { MessageDocument } from "../messages/message.types.js";
+import type { MessageUserStateEntity } from "../messages/message-user-state.model.js";
+import { MessageUserStateModel } from "../messages/message-user-state.model.js";
 import { UserModel } from "../users/user.model.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { ConversationModel } from "./conversation.model.js";
@@ -16,6 +19,7 @@ import type {
 } from "./conversation.validation.js";
 import type { ConversationDocument } from "./conversation.types.js";
 import { assertUsersCanInteract } from "../privacy/block.service.js";
+import { publishConversationCleared } from "./conversation.events.js";
 
 function conversationNotFound(): AppError {
   return new AppError({
@@ -27,6 +31,60 @@ function conversationNotFound(): AppError {
 
 function currentUserId(context: AuthContext): Types.ObjectId {
   return new Types.ObjectId(context.userId);
+}
+
+async function findLatestVisibleMessage(
+  conversation: ConversationDocument,
+  userId: string,
+): Promise<{
+  message: MessageDocument;
+  state: MessageUserStateEntity | null;
+} | null> {
+  const ownerId = new Types.ObjectId(userId);
+  const states = await MessageUserStateModel.find({
+    conversationId: conversation._id,
+    userId: ownerId,
+  })
+    .select({ messageId: 1, hidden: 1, favorite: 1, pinned: 1 })
+    .exec();
+  const hiddenMessageIds = states
+    .filter((state) => state.hidden)
+    .map((state) => state.messageId);
+  const favoriteMessageIds = states
+    .filter((state) => state.favorite && !state.hidden)
+    .map((state) => state.messageId);
+  const clauses: Record<string, unknown>[] = [
+    { conversationId: conversation._id },
+    ...(hiddenMessageIds.length > 0
+      ? [{ _id: { $nin: hiddenMessageIds } }]
+      : []),
+  ];
+  const participantState = conversation.participants.find((participant) =>
+    participant.userId.equals(ownerId),
+  );
+  if (
+    participantState?.clearedAt !== null &&
+    participantState?.clearedAt !== undefined
+  ) {
+    clauses.push({
+      $or: [
+        { createdAt: { $gt: participantState.clearedAt } },
+        ...(favoriteMessageIds.length > 0
+          ? [{ _id: { $in: favoriteMessageIds } }]
+          : []),
+      ],
+    });
+  }
+  const message = await MessageModel.find({ $and: clauses })
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(1)
+    .exec()
+    .then((items) => items[0] ?? null);
+  if (message === null) return null;
+  return {
+    message,
+    state: states.find((state) => state.messageId.equals(message._id)) ?? null,
+  };
 }
 
 export function directConversationKey(
@@ -166,13 +224,20 @@ export async function listConversations(
   const otherIds = page.map((conversation) =>
     getOtherParticipant(conversation, context.userId),
   );
-  const [users, contacts, messages] = await Promise.all([
+  const lastMessageIds = page.flatMap((conversation) =>
+    conversation.lastMessageId === null ? [] : [conversation.lastMessageId],
+  );
+  const [users, contacts, messages, messageStates] = await Promise.all([
     UserModel.find({ _id: { $in: otherIds } }).exec(),
     ContactModel.find({ ownerId, contactUserId: { $in: otherIds } }).exec(),
     MessageModel.find({
       _id: {
-        $in: page.flatMap((conversation) => conversation.lastMessageId ?? []),
+        $in: lastMessageIds,
       },
+    }).exec(),
+    MessageUserStateModel.find({
+      userId: ownerId,
+      messageId: { $in: lastMessageIds },
     }).exec(),
   ]);
   const usersById = new Map(users.map((user) => [user._id.toString(), user]));
@@ -182,16 +247,58 @@ export async function listConversations(
   const messagesById = new Map(
     messages.map((message) => [message._id.toString(), message]),
   );
+  const messageStatesById = new Map(
+    messageStates.map((state) => [state.messageId.toString(), state]),
+  );
+  const fallbackByConversationId = new Map<
+    string,
+    { message: MessageDocument; state: MessageUserStateEntity | null } | null
+  >();
+  await Promise.all(
+    page.map(async (conversation) => {
+      const message =
+        conversation.lastMessageId === null
+          ? null
+          : (messagesById.get(conversation.lastMessageId.toString()) ?? null);
+      const state =
+        message === null
+          ? null
+          : (messageStatesById.get(message._id.toString()) ?? null);
+      const participantState = conversation.participants.find((participant) =>
+        participant.userId.equals(ownerId),
+      );
+      const hiddenOrCleared =
+        message === null
+          ? conversation.lastMessageId !== null
+          : state?.hidden === true ||
+            (participantState?.clearedAt !== null &&
+              participantState?.clearedAt !== undefined &&
+              message.createdAt <= participantState.clearedAt &&
+              state?.favorite !== true);
+      if (!hiddenOrCleared) return;
+      fallbackByConversationId.set(
+        conversation._id.toString(),
+        await findLatestVisibleMessage(conversation, context.userId),
+      );
+    }),
+  );
   const result = page.flatMap((conversation) => {
     const participantId = getOtherParticipant(conversation, context.userId);
     const participant = usersById.get(participantId.toString());
     if (participant === undefined) {
       return [];
     }
-    const message =
+    const currentMessage =
       conversation.lastMessageId === null
         ? null
         : (messagesById.get(conversation.lastMessageId.toString()) ?? null);
+    const fallback = fallbackByConversationId.get(conversation._id.toString());
+    const message = fallback?.message ?? currentMessage;
+    const messageState =
+      fallback?.state ??
+      (message === null
+        ? null
+        : (messageStatesById.get(message._id.toString()) ?? null));
     return [
       toConversationDto(
         conversation,
@@ -199,6 +306,7 @@ export async function listConversations(
         participant,
         contactsByUserId.get(participantId.toString()) ?? null,
         message,
+        messageState,
       ),
     ];
   });
@@ -268,13 +376,19 @@ export async function setConversationUnread(
 export async function clearConversationForUser(
   context: AuthContext,
   conversationId: string,
-): Promise<ConversationDocument> {
+  keepFavorites = false,
+): Promise<{
+  conversation: ConversationDocument;
+  clearedAt: Date;
+  keptFavorites: boolean;
+}> {
   const conversation = await getOwnedConversation(context, conversationId);
+  const clearedAt = new Date();
   const updated = await ConversationModel.findOneAndUpdate(
     { _id: conversation._id },
     {
       $set: {
-        "participants.$[participant].clearedAt": new Date(),
+        "participants.$[participant].clearedAt": clearedAt,
         "participants.$[participant].manualUnread": false,
         "participants.$[participant].unreadCount": 0,
       },
@@ -285,7 +399,25 @@ export async function clearConversationForUser(
     },
   ).exec();
   if (updated === null) throw conversationNotFound();
-  return updated;
+  await MessageUserStateModel.updateMany(
+    {
+      conversationId: conversation._id,
+      userId: currentUserId(context),
+    },
+    {
+      $set: {
+        pinned: false,
+        ...(keepFavorites ? {} : { favorite: false }),
+      },
+    },
+  ).exec();
+  publishConversationCleared({
+    conversationId: conversation._id.toString(),
+    userId: context.userId,
+    clearedAt: clearedAt.toISOString(),
+    keptFavorites: keepFavorites,
+  });
+  return { conversation: updated, clearedAt, keptFavorites: keepFavorites };
 }
 
 export async function setConversationMute(

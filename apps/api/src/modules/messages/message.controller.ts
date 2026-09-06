@@ -8,11 +8,21 @@ import {
   messageIdParamsSchema,
   messageReactionSchema,
   messageTextSchema,
+  messageEditSchema,
+  messagePinSchema,
+  e2efeEncryptedMessageSchema,
+  e2efeEncryptedMessageEditSchema,
 } from "./message.validation.js";
+import { editEncryptedMessage, sendEncryptedMessage } from "./encrypted-message.service.js";
 import {
+  deleteMessageForEveryone,
+  deleteMessageForMe,
+  editMessage,
   getMessageHistory,
   markConversationRead,
   sendTextMessage,
+  setMessageFavorite,
+  setMessagePin,
   updateMessageReaction,
 } from "./message.service.js";
 
@@ -58,6 +68,54 @@ const handleHistory = async (
   response.status(200).json({ success: true, data: result });
 };
 
+const handleEncryptedSend = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { conversationId } = conversationMessageParamsSchema.parse(
+    request.params,
+  );
+  const result = await sendEncryptedMessage(
+    requireAuthContext(request),
+    conversationId,
+    e2efeEncryptedMessageSchema.parse({
+      ...request.body,
+      conversationId,
+    }),
+  );
+  response.status(result.duplicate ? 200 : 201).json({
+    success: true,
+    data: {
+      message: result.message,
+      envelopes: result.envelopes,
+      duplicate: result.duplicate,
+    },
+  });
+};
+
+const handleEncryptedEdit = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const result = await editEncryptedMessage(
+    requireAuthContext(request),
+    messageId,
+    e2efeEncryptedMessageEditSchema.parse({
+      ...request.body,
+      messageId,
+    }),
+  );
+  response.status(result.duplicate ? 200 : 200).json({
+    success: true,
+    data: {
+      message: result.message,
+      envelopes: result.envelopes,
+      duplicate: result.duplicate,
+    },
+  });
+};
+
 const handleRead = async (
   request: Request,
   response: Response,
@@ -99,7 +157,106 @@ const handleRemoveReaction = async (
   response.status(200).json({ success: true, data: { message } });
 };
 
+const handleEdit = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const message = await editMessage(
+    requireAuthContext(request),
+    messageId,
+    messageEditSchema.parse(request.body).text,
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
+const handleDeleteForMe = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const result = await deleteMessageForMe(
+    requireAuthContext(request),
+    messageId,
+  );
+  response.status(200).json({ success: true, data: result });
+};
+
+const handleDeleteForEveryone = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const message = await deleteMessageForEveryone(
+    requireAuthContext(request),
+    messageId,
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
+const handleFavorite = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const state = await setMessageFavorite(
+    requireAuthContext(request),
+    messageId,
+    true,
+  );
+  response.status(200).json({ success: true, data: { state } });
+};
+
+const handleUnfavorite = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const state = await setMessageFavorite(
+    requireAuthContext(request),
+    messageId,
+    false,
+  );
+  response.status(200).json({ success: true, data: { state } });
+};
+
+const handlePin = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const { scope } = messagePinSchema.parse(request.body);
+  const message = await setMessagePin(
+    requireAuthContext(request),
+    messageId,
+    scope,
+    true,
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
+const handleUnpin = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const { messageId } = messageIdParamsSchema.parse(request.params);
+  const { scope } = messagePinSchema.parse(request.body);
+  const message = await setMessagePin(
+    requireAuthContext(request),
+    messageId,
+    scope,
+    false,
+  );
+  response.status(200).json({ success: true, data: { message } });
+};
+
 export const sendMessageController: RequestHandler = controller(handleSend);
+export const sendEncryptedMessageController: RequestHandler = controller(
+  handleEncryptedSend,
+);
+export const editEncryptedMessageController: RequestHandler = controller(
+  handleEncryptedEdit,
+);
 export const messageHistoryController: RequestHandler =
   controller(handleHistory);
 export const markReadController: RequestHandler = controller(handleRead);
@@ -107,3 +264,15 @@ export const updateReactionController: RequestHandler =
   controller(handleReaction);
 export const removeReactionController: RequestHandler =
   controller(handleRemoveReaction);
+export const editMessageController: RequestHandler = controller(handleEdit);
+export const deleteMessageForMeController: RequestHandler =
+  controller(handleDeleteForMe);
+export const deleteMessageForEveryoneController: RequestHandler = controller(
+  handleDeleteForEveryone,
+);
+export const favoriteMessageController: RequestHandler =
+  controller(handleFavorite);
+export const unfavoriteMessageController: RequestHandler =
+  controller(handleUnfavorite);
+export const pinMessageController: RequestHandler = controller(handlePin);
+export const unpinMessageController: RequestHandler = controller(handleUnpin);

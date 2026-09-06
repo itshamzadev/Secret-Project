@@ -26,6 +26,8 @@ const mediaSchema = new Schema(
     durationSeconds: { type: Number, default: null },
     thumbnailUrl: { type: String, default: null },
     fileName: { type: String, default: null },
+    encrypted: { type: Boolean, default: false },
+    encryptionVersion: { type: String, default: null },
   },
   { _id: false },
 );
@@ -60,8 +62,28 @@ const messageSchema = new Schema<MessageEntity>(
       default: null,
       maxlength: 4000,
     },
+    e2efeVersion: {
+      type: String,
+      enum: ["terqivo-e2efe-v1", null],
+      default: null,
+    },
+    senderDeviceId: { type: Number, min: 1, max: 127, default: null },
+    e2efeRevisionId: { type: String, default: null, maxlength: 128 },
     media: { type: mediaSchema, default: null },
     reactions: { type: [reactionSchema], default: [] },
+    editedAt: { type: Date, default: null },
+    deletedForEveryoneAt: { type: Date, default: null },
+    deletedForEveryoneBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    pinnedForEveryoneAt: { type: Date, default: null },
+    pinnedForEveryoneBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     replyToMessageId: {
       type: Schema.Types.ObjectId,
       ref: "Message",

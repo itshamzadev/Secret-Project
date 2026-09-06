@@ -121,6 +121,9 @@ const environmentSchema = z.object({
   ),
   GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.7-flash"),
   AI_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(20),
+  // Keep plaintext compatible during migration. Enable only after every
+  // production client has a validated E2EFE implementation.
+  E2EFE_ENFORCEMENT_ENABLED: z.coerce.boolean().default(false),
   ADMIN_JWT_SECRET: z.preprocess(
     (value) =>
       typeof value === "string" && value.trim() === "" ? undefined : value,

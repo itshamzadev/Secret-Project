@@ -7,6 +7,7 @@ import type {
   CallIncomingSocketEvent,
   CallSocketEvent,
   CallAnsweredElsewhereEvent,
+  E2EFEEncryptedMessageData,
 } from "@terqivo/contracts";
 import { Server, type Socket } from "socket.io";
 
@@ -23,9 +24,11 @@ import {
   markMessageDelivered,
   sendTextMessage,
 } from "../modules/messages/message.service.js";
+import { sendEncryptedMessage } from "../modules/messages/encrypted-message.service.js";
 import {
   socketDeliveredSchema,
   socketMessageSendSchema,
+  e2efeEncryptedMessageSchema,
   socketReadSchema,
   typingSchema,
 } from "../modules/messages/message.validation.js";
@@ -70,8 +73,14 @@ import {
 } from "../modules/notifications/push.service.js";
 import {
   subscribeToMessageCreated,
+  subscribeToMessageDeleted,
   subscribeToMessageReactionUpdated,
+  subscribeToMessageUpdated,
+  subscribeToMessageUserStateUpdated,
+  subscribeToEncryptedMessageCreated,
+  subscribeToEncryptedMessageUpdated,
 } from "../modules/messages/message.events.js";
+import { subscribeToConversationCleared } from "../modules/conversations/conversation.events.js";
 
 export interface SocketRuntime {
   io: Server;
@@ -452,6 +461,32 @@ function installMessageEvents(io: Server, socket: Socket): void {
   });
 
   socket.on(
+    "message:send-encrypted",
+    (payload: unknown, ack?: SocketAck<E2EFEEncryptedMessageData>) => {
+      const parsed = e2efeEncryptedMessageSchema.safeParse(payload);
+      if (!parsed.success) {
+        acknowledge(ack, SOCKET_VALIDATION_ERROR);
+        return;
+      }
+      void sendEncryptedMessage(contextForSocket(socket), parsed.data.conversationId, parsed.data)
+        .then((result) => {
+          acknowledge(ack, {
+            success: true,
+            data: {
+              message: result.message,
+              envelopes: result.envelopes,
+              duplicate: result.duplicate,
+            },
+          });
+        })
+        .catch((error: unknown) => {
+          logSocketError(socket, "message:send-encrypted", error);
+          acknowledge(ack, errorResponse(error));
+        });
+    },
+  );
+
+  socket.on(
     "message:delivered",
     (payload: unknown, ack?: SocketAck<unknown>) => {
       const parsed = socketDeliveredSchema.safeParse(payload);
@@ -617,6 +652,22 @@ export async function createSocketServer(
       duplicate: false,
     });
   });
+  const unsubscribeEncryptedMessageEvents = subscribeToEncryptedMessageCreated(
+    (event) => {
+      io.to(userRoom(event.recipientId)).emit("message:encrypted-new", {
+        message: event.message,
+        envelope: event.envelope,
+      });
+    },
+  );
+  const unsubscribeEncryptedMessageUpdatedEvents = subscribeToEncryptedMessageUpdated(
+    (event) => {
+      io.to(userRoom(event.recipientId)).emit("message:encrypted-updated", {
+        message: event.message,
+        envelope: event.envelope,
+      });
+    },
+  );
   const unsubscribeReactionEvents = subscribeToMessageReactionUpdated(
     (event) => {
       io.to(userRoom(event.recipientId)).emit("message:reaction-updated", {
@@ -625,6 +676,32 @@ export async function createSocketServer(
       io.to(userRoom(event.senderId)).emit("message:reaction-updated", {
         message: event.message,
       });
+    },
+  );
+  const unsubscribeUpdatedEvents = subscribeToMessageUpdated((event) => {
+    io.to(userRoom(event.recipientId)).emit("message:updated", {
+      message: event.message,
+    });
+    io.to(userRoom(event.senderId)).emit("message:updated", {
+      message: event.message,
+    });
+  });
+  const unsubscribeDeletedEvents = subscribeToMessageDeleted((event) => {
+    io.to(userRoom(event.recipientId)).emit("message:deleted", {
+      message: event.message,
+    });
+    io.to(userRoom(event.senderId)).emit("message:deleted", {
+      message: event.message,
+    });
+  });
+  const unsubscribeUserStateEvents = subscribeToMessageUserStateUpdated(
+    (event) => {
+      io.to(userRoom(event.userId)).emit("message:user-state-updated", event);
+    },
+  );
+  const unsubscribeConversationCleared = subscribeToConversationCleared(
+    (event) => {
+      io.to(userRoom(event.userId)).emit("conversation:cleared", event);
     },
   );
 
@@ -741,7 +818,13 @@ export async function createSocketServer(
     close: async () => {
       callTimeoutCoordinator.stop();
       unsubscribeMessageEvents();
+      unsubscribeEncryptedMessageEvents();
+      unsubscribeEncryptedMessageUpdatedEvents();
       unsubscribeReactionEvents();
+      unsubscribeUpdatedEvents();
+      unsubscribeDeletedEvents();
+      unsubscribeUserStateEvents();
+      unsubscribeConversationCleared();
       await io.close();
       if (redisSubscriber.isOpen) {
         await redisSubscriber.quit();

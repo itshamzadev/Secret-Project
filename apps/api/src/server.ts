@@ -14,7 +14,9 @@ import { initializeCallModels } from "./modules/calls/call.service.js";
 import { initializeNotificationModels } from "./modules/notifications/notification.service.js";
 import { initializeAdminModels } from "./modules/admin/admin.service.js";
 import { initializeMediaStorage } from "./modules/media/media.storage.js";
+import { initializeMediaModels } from "./modules/media/media.service.js";
 import { initializeBlockModels } from "./modules/privacy/block.service.js";
+import { initializeE2EFEModels } from "./modules/e2efe/e2efe.service.js";
 import { createSocketServer, type SocketRuntime } from "./sockets/index.js";
 
 const app = createApp();
@@ -74,6 +76,8 @@ export async function startServer(): Promise<void> {
     await initializeBlockModels();
     await initializeAdminModels();
     await initializeMediaStorage();
+    await initializeE2EFEModels();
+    await initializeMediaModels();
     socketRuntime = await createSocketServer(httpServer);
 
     await new Promise<void>((resolve, reject) => {

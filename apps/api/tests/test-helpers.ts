@@ -11,6 +11,7 @@ import { initializeConversationModels } from "../src/modules/conversations/conve
 import { ConversationModel } from "../src/modules/conversations/conversation.model.js";
 import { initializeMessageModels } from "../src/modules/messages/message.service.js";
 import { MessageModel } from "../src/modules/messages/message.model.js";
+import { MessageUserStateModel } from "../src/modules/messages/message-user-state.model.js";
 import { UserModel } from "../src/modules/users/user.model.js";
 import { initializePresenceModels } from "../src/modules/users/presence.service.js";
 import { UserPresenceSessionModel } from "../src/modules/users/user-presence-session.model.js";
@@ -21,6 +22,11 @@ import { PushDeviceModel } from "../src/modules/notifications/push-device.model.
 import { initializeNotificationModels } from "../src/modules/notifications/notification.service.js";
 import { UserBlockModel } from "../src/modules/privacy/block.model.js";
 import { initializeBlockModels } from "../src/modules/privacy/block.service.js";
+import { initializeE2EFEModels } from "../src/modules/e2efe/e2efe.service.js";
+import { E2EFEDeviceModel } from "../src/modules/e2efe/e2efe-device.model.js";
+import { E2EFEMessageEnvelopeModel } from "../src/modules/e2efe/e2efe-message-envelope.model.js";
+import { E2EFEStagedMediaModel } from "../src/modules/media/e2efe-media-upload.model.js";
+import { initializeMediaModels } from "../src/modules/media/media.service.js";
 
 export interface TestRegisterPayload {
   username: string;
@@ -87,11 +93,14 @@ export async function connectTestData(): Promise<void> {
   await initializeCallModels();
   await initializeNotificationModels();
   await initializeBlockModels();
+  await initializeE2EFEModels();
+  await initializeMediaModels();
 }
 
 export async function clearTestData(): Promise<void> {
   await Promise.all([
     MessageModel.deleteMany({}),
+    MessageUserStateModel.deleteMany({}),
     ConversationModel.deleteMany({}),
     ContactModel.deleteMany({}),
     AuthSessionModel.deleteMany({}),
@@ -100,6 +109,9 @@ export async function clearTestData(): Promise<void> {
     PushDeviceModel.deleteMany({}),
     UserModel.deleteMany({}),
     UserBlockModel.deleteMany({}),
+    E2EFEDeviceModel.deleteMany({}),
+    E2EFEMessageEnvelopeModel.deleteMany({}),
+    E2EFEStagedMediaModel.deleteMany({}),
   ]);
   if (redisClient.isReady) {
     await redisClient.del(callTimeoutKeys.timeoutSetKey);

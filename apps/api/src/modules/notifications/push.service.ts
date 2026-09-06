@@ -92,6 +92,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function notificationPreview(message: MessageDto): string {
+  if (message.e2efeVersion !== null && message.e2efeVersion !== undefined) {
+    return "New encrypted message";
+  }
   if (message.type === "image") return "Photo";
   if (message.type === "video") return "Video";
   if (message.type === "audio") return "Voice message";

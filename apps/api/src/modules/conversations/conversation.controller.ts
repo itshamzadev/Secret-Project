@@ -7,6 +7,7 @@ import {
   conversationMuteSchema,
   conversationIdParamsSchema,
   conversationUnreadSchema,
+  conversationClearSchema,
 } from "./conversation.validation.js";
 import {
   createOrGetDirectConversation,
@@ -94,8 +95,20 @@ const handleClear = async (
   response: Response,
 ): Promise<void> => {
   const { conversationId } = conversationIdParamsSchema.parse(request.params);
-  await clearConversationForUser(requireAuthContext(request), conversationId);
-  response.status(200).json({ success: true, data: { cleared: true } });
+  const { keepFavorites } = conversationClearSchema.parse(request.body ?? {});
+  const result = await clearConversationForUser(
+    requireAuthContext(request),
+    conversationId,
+    keepFavorites,
+  );
+  response.status(200).json({
+    success: true,
+    data: {
+      conversationId,
+      clearedAt: result.clearedAt.toISOString(),
+      keptFavorites: result.keptFavorites,
+    },
+  });
 };
 
 const handleMute = async (

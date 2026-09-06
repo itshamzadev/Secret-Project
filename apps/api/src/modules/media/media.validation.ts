@@ -39,6 +39,11 @@ export const mediaUploadQuerySchema = z.object({
   durationSeconds: z.coerce.number().min(0).max(86_400).optional(),
 });
 
+export const e2efeMediaUploadQuerySchema = z.object({
+  clientMessageId: mediaUploadQuerySchema.shape.clientMessageId,
+  type: mediaUploadQuerySchema.shape.type,
+});
+
 export type MediaUploadQuery = z.infer<typeof mediaUploadQuerySchema>;
 
 export interface DetectedMedia {

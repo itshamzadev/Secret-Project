@@ -19,6 +19,10 @@ export const conversationUnreadSchema = z.object({
   unread: z.boolean(),
 });
 
+export const conversationClearSchema = z.object({
+  keepFavorites: z.boolean().default(false),
+});
+
 export const conversationMuteSchema = z.object({
   duration: z.enum(["8h", "1w", "always"]),
 });

@@ -4,6 +4,8 @@ import { env } from "../../config/env.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import {
   downloadMediaController,
+  encryptedMediaMessageController,
+  encryptedMediaUploadController,
   uploadMediaController,
 } from "./media.controller.js";
 
@@ -24,7 +26,16 @@ const binaryMediaBody = express.raw({
 export function createMediaRouter(): Router {
   const router = Router();
   router.use(authenticate);
+  router.post(
+    "/:conversationId/media/encrypted/upload",
+    binaryMediaBody,
+    encryptedMediaUploadController,
+  );
   router.post("/:conversationId/media", binaryMediaBody, uploadMediaController);
+  router.post(
+    "/:conversationId/messages/encrypted-media",
+    encryptedMediaMessageController,
+  );
   return router;
 }
 

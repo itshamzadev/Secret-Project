@@ -5,6 +5,7 @@ allowBuilds:
   argon2: true
   electron: true
   esbuild: true
+  redis-memory-server: true
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - expo-constants@57.0.17

@@ -1,4 +1,7 @@
-import type { MessageDto } from "@terqivo/contracts";
+import type {
+  MessageDto,
+  MessageUserStateUpdatedEvent,
+} from "@terqivo/contracts";
 import { Types } from "mongoose";
 
 import { AppError } from "../../core/errors.js";
@@ -20,9 +23,19 @@ import type {
   MessageTextInput,
 } from "./message.validation.js";
 import type { MessageDocument } from "./message.types.js";
+import type { MessageUserStateEntity } from "./message-user-state.model.js";
 import type { MessageReactionInput } from "./message.validation.js";
-import { publishMessageReactionUpdated } from "./message.events.js";
 import { assertUsersCanInteract } from "../privacy/block.service.js";
+import { MessageUserStateModel } from "./message-user-state.model.js";
+import {
+  publishMessageDeleted,
+  publishMessageReactionUpdated,
+  publishMessageUpdated,
+  publishMessageUserStateUpdated,
+} from "./message.events.js";
+import { E2EFEMessageEnvelopeModel } from "../e2efe/e2efe-message-envelope.model.js";
+import { E2EFEDeviceModel } from "../e2efe/e2efe-device.model.js";
+import { env } from "../../config/env.js";
 
 function messageNotFound(): AppError {
   return new AppError({
@@ -38,6 +51,43 @@ function receiptNotAllowed(): AppError {
     message: "This receipt cannot be applied to that message.",
     statusCode: 400,
   });
+}
+
+function messageActionNotAllowed(code: string, message: string): AppError {
+  return new AppError({ code, message, statusCode: 403 });
+}
+
+function deletedMessageNotEditable(): AppError {
+  return new AppError({
+    code: "MESSAGE_DELETED_FOR_EVERYONE",
+    message: "A deleted message cannot be changed.",
+    statusCode: 409,
+  });
+}
+
+async function assertPlaintextSendAllowed(
+  senderId: string,
+  recipientId: string,
+): Promise<void> {
+  if (!env.E2EFE_ENFORCEMENT_ENABLED) return;
+
+  const [senderDevice, recipientDevice] = await Promise.all([
+    E2EFEDeviceModel.exists({
+      userId: new Types.ObjectId(senderId),
+      active: true,
+    }),
+    E2EFEDeviceModel.exists({
+      userId: new Types.ObjectId(recipientId),
+      active: true,
+    }),
+  ]);
+  if (senderDevice !== null && recipientDevice !== null) {
+    throw new AppError({
+      code: "E2EFE_REQUIRED",
+      message: "This conversation requires end-to-end encrypted messaging.",
+      statusCode: 409,
+    });
+  }
 }
 
 export interface SentMessageResult {
@@ -73,7 +123,12 @@ export async function sendTextMessage(
     }
     const conversation = await getOwnedConversation(context, conversationId);
     return {
-      message: toMessageDto(existing, conversation, context.userId),
+      message: toMessageDto(
+        existing,
+        conversation,
+        context.userId,
+        await getMessageUserState(existing, context.userId),
+      ),
       conversation,
       recipientId: getOtherParticipant(conversation, context.userId).toString(),
       duplicate: true,
@@ -83,6 +138,7 @@ export async function sendTextMessage(
   const conversation = await getOwnedConversation(context, conversationId);
   const recipientId = getOtherParticipant(conversation, context.userId);
   await assertUsersCanInteract(context.userId, recipientId.toString());
+  await assertPlaintextSendAllowed(context.userId, recipientId.toString());
   const updatedConversation = await ConversationModel.findOneAndUpdate(
     {
       _id: conversation._id,
@@ -134,6 +190,7 @@ export async function sendTextMessage(
             concurrent,
             currentConversation,
             context.userId,
+            await getMessageUserState(concurrent, context.userId),
           ),
           conversation: currentConversation,
           recipientId: recipientId.toString(),
@@ -189,7 +246,12 @@ export async function sendMediaMessage(
     }
     const conversation = await getOwnedConversation(context, conversationId);
     return {
-      message: toMessageDto(existing, conversation, context.userId),
+      message: toMessageDto(
+        existing,
+        conversation,
+        context.userId,
+        await getMessageUserState(existing, context.userId),
+      ),
       conversation,
       recipientId: getOtherParticipant(conversation, context.userId).toString(),
       duplicate: true,
@@ -199,6 +261,7 @@ export async function sendMediaMessage(
   const conversation = await getOwnedConversation(context, conversationId);
   const recipientId = getOtherParticipant(conversation, context.userId);
   await assertUsersCanInteract(context.userId, recipientId.toString());
+  await assertPlaintextSendAllowed(context.userId, recipientId.toString());
   const updatedConversation = await ConversationModel.findOneAndUpdate(
     {
       _id: conversation._id,
@@ -248,6 +311,7 @@ export async function sendMediaMessage(
             concurrent,
             currentConversation,
             context.userId,
+            await getMessageUserState(concurrent, context.userId),
           ),
           conversation: currentConversation,
           recipientId: recipientId.toString(),
@@ -294,11 +358,34 @@ export async function getMessageHistory(
     (participant) => participant.userId.toString() === context.userId,
   );
   const historyClauses: Record<string, unknown>[] = [];
+  const userId = new Types.ObjectId(context.userId);
+  const userStates = await MessageUserStateModel.find({
+    conversationId: conversation._id,
+    userId,
+  })
+    .select({ messageId: 1, hidden: 1, favorite: 1, pinned: 1 })
+    .exec();
+  const hiddenMessageIds = userStates
+    .filter((state) => state.hidden)
+    .map((state) => state.messageId);
+  if (hiddenMessageIds.length > 0) {
+    historyClauses.push({ _id: { $nin: hiddenMessageIds } });
+  }
   if (
     participantState?.clearedAt !== null &&
     participantState?.clearedAt !== undefined
   ) {
-    historyClauses.push({ createdAt: { $gt: participantState.clearedAt } });
+    const favoriteMessageIds = userStates
+      .filter((state) => state.favorite && !state.hidden)
+      .map((state) => state.messageId);
+    historyClauses.push({
+      $or: [
+        { createdAt: { $gt: participantState.clearedAt } },
+        ...(favoriteMessageIds.length > 0
+          ? [{ _id: { $in: favoriteMessageIds } }]
+          : []),
+      ],
+    });
   }
   if (cursor !== null) {
     const cursorDate = new Date(cursor.createdAt);
@@ -331,10 +418,30 @@ export async function getMessageHistory(
     .exec();
   const hasNext = messages.length > query.limit;
   const page = hasNext ? messages.slice(0, query.limit) : messages;
+  const envelopes =
+    query.e2efeDeviceId === undefined || page.length === 0
+      ? []
+      : await E2EFEMessageEnvelopeModel.find({
+          messageId: { $in: page.map((message) => message._id) },
+          recipientUserId: userId,
+          recipientDeviceId: query.e2efeDeviceId,
+        }).exec();
+  const envelopesByMessageId = new Map(
+    envelopes.map((envelope) => [envelope.messageId.toString(), envelope]),
+  );
+  const statesByMessageId = new Map(
+    userStates.map((state) => [state.messageId.toString(), state]),
+  );
   const last = page.at(-1);
   return {
     messages: page.map((message) =>
-      toMessageDto(message, conversation, context.userId),
+      toMessageDto(
+        message,
+        conversation,
+        context.userId,
+        statesByMessageId.get(message._id.toString()) ?? null,
+        envelopesByMessageId.get(message._id.toString()) ?? null,
+      ),
     ),
     nextCursor:
       hasNext && last !== undefined
@@ -346,6 +453,255 @@ export async function getMessageHistory(
   };
 }
 
+export async function getMessageActionContext(
+  context: AuthContext,
+  messageId: string,
+): Promise<{ message: MessageDocument; conversation: ConversationDocument }> {
+  if (!Types.ObjectId.isValid(messageId)) throw messageNotFound();
+  const message = await MessageModel.findById(messageId).exec();
+  if (message === null) throw messageNotFound();
+  const conversation = await getOwnedConversation(
+    context,
+    message.conversationId.toString(),
+  );
+  return { message, conversation };
+}
+
+async function getMessageUserState(
+  message: MessageDocument,
+  userId: string,
+): Promise<MessageUserStateEntity | null> {
+  return MessageUserStateModel.findOne({
+    messageId: message._id,
+    userId: new Types.ObjectId(userId),
+  }).exec();
+}
+
+async function upsertMessageUserState(
+  message: MessageDocument,
+  userId: string,
+  changes: Partial<
+    Pick<MessageUserStateEntity, "hidden" | "favorite" | "pinned">
+  >,
+) {
+  return MessageUserStateModel.findOneAndUpdate(
+    { messageId: message._id, userId: new Types.ObjectId(userId) },
+    {
+      $set: changes,
+      $setOnInsert: {
+        messageId: message._id,
+        conversationId: message.conversationId,
+        userId: new Types.ObjectId(userId),
+      },
+    },
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+  ).exec();
+}
+
+function stateEvent(
+  message: MessageDocument,
+  userId: string,
+  state: MessageUserStateEntity,
+): MessageUserStateUpdatedEvent {
+  return {
+    messageId: message._id.toString(),
+    conversationId: message.conversationId.toString(),
+    userId,
+    hidden: state.hidden,
+    favorite: state.favorite,
+    pinned: state.pinned,
+  };
+}
+
+export interface DeleteForMeResult {
+  messageId: string;
+  conversationId: string;
+  deletedForMe: true;
+}
+
+export async function deleteMessageForMe(
+  context: AuthContext,
+  messageId: string,
+): Promise<DeleteForMeResult> {
+  const { message } = await getMessageActionContext(context, messageId);
+  const state = await upsertMessageUserState(message, context.userId, {
+    hidden: true,
+    favorite: false,
+    pinned: false,
+  });
+  if (state === null) throw messageNotFound();
+  publishMessageUserStateUpdated(stateEvent(message, context.userId, state));
+  return {
+    messageId: message._id.toString(),
+    conversationId: message.conversationId.toString(),
+    deletedForMe: true,
+  };
+}
+
+export async function deleteMessageForEveryone(
+  context: AuthContext,
+  messageId: string,
+): Promise<MessageDto> {
+  const { message, conversation } = await getMessageActionContext(
+    context,
+    messageId,
+  );
+  if (message.senderId.toString() !== context.userId) {
+    throw messageActionNotAllowed(
+      "DELETE_FOR_EVERYONE_FORBIDDEN",
+      "Only the sender can delete this message for everyone.",
+    );
+  }
+  if (message.deletedForEveryoneAt == null) {
+    message.deletedForEveryoneAt = new Date();
+    message.deletedForEveryoneBy = new Types.ObjectId(context.userId);
+    message.text = null;
+    message.media = null;
+    message.reactions = [];
+    message.editedAt = null;
+    message.pinnedForEveryoneAt = null;
+    message.pinnedForEveryoneBy = null;
+    await message.save();
+    await MessageUserStateModel.updateMany(
+      { messageId: message._id },
+      { $set: { favorite: false, pinned: false } },
+    ).exec();
+  }
+  const dto = toMessageDto(message, conversation, context.userId);
+  const recipientId = getOtherParticipant(
+    conversation,
+    context.userId,
+  ).toString();
+  publishMessageDeleted({
+    message: dto,
+    recipientId,
+    senderId: context.userId,
+  });
+  return dto;
+}
+
+export async function editMessage(
+  context: AuthContext,
+  messageId: string,
+  text: string,
+): Promise<MessageDto> {
+  const { message, conversation } = await getMessageActionContext(
+    context,
+    messageId,
+  );
+  if (message.senderId.toString() !== context.userId) {
+    throw messageActionNotAllowed(
+      "MESSAGE_EDIT_FORBIDDEN",
+      "Only the sender can edit this message.",
+    );
+  }
+  if (message.deletedForEveryoneAt != null) throw deletedMessageNotEditable();
+  if (message.e2efeVersion !== null) {
+    throw new AppError({
+      code: "E2EFE_EDIT_REQUIRES_ENCRYPTED_REVISION",
+      message:
+        "Encrypted messages must be edited through the encrypted client.",
+      statusCode: 409,
+    });
+  }
+  if (message.type !== "text") {
+    throw new AppError({
+      code: "MESSAGE_TYPE_NOT_EDITABLE",
+      message: "Only text messages can be edited.",
+      statusCode: 400,
+    });
+  }
+  message.text = text;
+  message.editedAt = new Date();
+  await message.save();
+  const dto = toMessageDto(message, conversation, context.userId);
+  publishMessageUpdated({
+    message: dto,
+    recipientId: getOtherParticipant(conversation, context.userId).toString(),
+    senderId: context.userId,
+  });
+  return dto;
+}
+
+export interface MessagePersonalStateResult {
+  messageId: string;
+  conversationId: string;
+  favorite: boolean;
+  pinned: boolean;
+}
+
+export async function setMessageFavorite(
+  context: AuthContext,
+  messageId: string,
+  favorite: boolean,
+): Promise<MessagePersonalStateResult> {
+  const { message } = await getMessageActionContext(context, messageId);
+  if (message.deletedForEveryoneAt != null) throw deletedMessageNotEditable();
+  const state = await upsertMessageUserState(message, context.userId, {
+    favorite,
+  });
+  if (state === null) throw messageNotFound();
+  publishMessageUserStateUpdated(stateEvent(message, context.userId, state));
+  return {
+    messageId: message._id.toString(),
+    conversationId: message.conversationId.toString(),
+    favorite: state.favorite,
+    pinned: state.pinned,
+  };
+}
+
+export async function setMessagePin(
+  context: AuthContext,
+  messageId: string,
+  scope: "me" | "everyone",
+  pinned: boolean,
+): Promise<MessageDto> {
+  const { message, conversation } = await getMessageActionContext(
+    context,
+    messageId,
+  );
+  if (message.deletedForEveryoneAt != null) throw deletedMessageNotEditable();
+  if (scope === "me") {
+    const state = await upsertMessageUserState(message, context.userId, {
+      pinned,
+    });
+    if (state === null) throw messageNotFound();
+    publishMessageUserStateUpdated(stateEvent(message, context.userId, state));
+    return toMessageDto(message, conversation, context.userId, state);
+  }
+
+  const otherPinned = pinned
+    ? await MessageModel.findOne({
+        conversationId: conversation._id,
+        _id: { $ne: message._id },
+        pinnedForEveryoneAt: { $ne: null },
+      }).exec()
+    : null;
+  if (otherPinned !== null) {
+    otherPinned.pinnedForEveryoneAt = null;
+    otherPinned.pinnedForEveryoneBy = null;
+    await otherPinned.save();
+    const oldDto = toMessageDto(otherPinned, conversation, context.userId);
+    publishMessageUpdated({
+      message: oldDto,
+      recipientId: getOtherParticipant(conversation, context.userId).toString(),
+      senderId: context.userId,
+    });
+  }
+  message.pinnedForEveryoneAt = pinned ? new Date() : null;
+  message.pinnedForEveryoneBy = pinned
+    ? new Types.ObjectId(context.userId)
+    : null;
+  await message.save();
+  const dto = toMessageDto(message, conversation, context.userId);
+  publishMessageUpdated({
+    message: dto,
+    recipientId: getOtherParticipant(conversation, context.userId).toString(),
+    senderId: context.userId,
+  });
+  return dto;
+}
+
 export async function updateMessageReaction(
   context: AuthContext,
   messageId: string,
@@ -354,6 +710,7 @@ export async function updateMessageReaction(
   if (!Types.ObjectId.isValid(messageId)) throw messageNotFound();
   const message = await MessageModel.findById(messageId).exec();
   if (message === null) throw messageNotFound();
+  if (message.deletedForEveryoneAt != null) throw deletedMessageNotEditable();
   const conversation = await getOwnedConversation(
     context,
     message.conversationId.toString(),
@@ -526,4 +883,5 @@ export async function markConversationRead(
 
 export async function initializeMessageModels(): Promise<void> {
   await MessageModel.init();
+  await MessageUserStateModel.init();
 }

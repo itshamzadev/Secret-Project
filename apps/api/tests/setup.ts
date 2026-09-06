@@ -1,10 +1,12 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll } from "vitest";
+
+import { startTestRedis, stopTestRedis } from "./redis-test-server.js";
 
 process.env.NODE_ENV = "test";
 process.env.PORT = "5000";
 process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/terqivo_connect_test";
-process.env.REDIS_URL = "redis://127.0.0.1:6379";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 delete process.env.PUBLIC_URL;
 process.env.MEDIA_STORAGE_DRIVER = "local";
@@ -16,3 +18,10 @@ process.env.JWT_REFRESH_SECRET =
 process.env.AUTH_REGISTER_RATE_LIMIT_MAX = "1000";
 process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "1000";
 process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "1000";
+process.env.E2EFE_ENFORCEMENT_ENABLED = "true";
+
+await startTestRedis();
+
+afterAll(async () => {
+  await stopTestRedis();
+});
