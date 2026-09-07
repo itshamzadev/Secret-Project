@@ -19,10 +19,15 @@ import {
 } from "./auth.service.js";
 import { toSafeUserDto } from "../users/user.dto.js";
 import {
+  normalizeUsername,
+  usernameExists,
+} from "../users/user.service.js";
+import {
   loginSchema,
   refreshSchema,
   registerSchema,
   sessionIdParamsSchema,
+  usernameExistsQuerySchema,
 } from "./auth.validation.js";
 
 function sendAuthResponse(
@@ -64,6 +69,15 @@ async function handleLogin(
   );
   const result = await loginUser(input, device);
   sendAuthResponse(response, result, 200);
+}
+
+async function handleUsernameExists(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const { username } = usernameExistsQuerySchema.parse(request.query);
+  const exists = await usernameExists(normalizeUsername(username));
+  response.status(200).json({ success: true, data: { exists } });
 }
 
 async function handleRefresh(
@@ -155,6 +169,8 @@ function controller(
 
 export const registerController: RequestHandler = controller(handleRegister);
 export const loginController: RequestHandler = controller(handleLogin);
+export const usernameExistsController: RequestHandler =
+  controller(handleUsernameExists);
 export const refreshController: RequestHandler = controller(handleRefresh);
 export const logoutController: RequestHandler = controller(handleLogout);
 export const logoutAllController: RequestHandler = controller(handleLogoutAll);

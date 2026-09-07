@@ -4,6 +4,13 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 const platformSchema = z.enum(clientPlatforms);
 
+const usernameSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(30)
+  .regex(/^[A-Za-z0-9_.]+$/, "username contains unsupported characters");
+
 const deviceFields = {
   deviceId: z
     .string()
@@ -30,12 +37,7 @@ const deviceFields = {
 };
 
 export const registerSchema = z.object({
-  username: z
-    .string()
-    .trim()
-    .min(3)
-    .max(30)
-    .regex(/^[A-Za-z0-9_.]+$/, "username contains unsupported characters"),
+  username: usernameSchema,
   name: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(254).toLowerCase().optional(),
   phone: z
@@ -50,6 +52,10 @@ export const registerSchema = z.object({
     ),
   password: z.string().min(8).max(1024),
   ...deviceFields,
+});
+
+export const usernameExistsQuerySchema = z.object({
+  username: usernameSchema,
 });
 
 export const loginSchema = z.object({

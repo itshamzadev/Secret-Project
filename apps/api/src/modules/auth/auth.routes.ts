@@ -12,6 +12,7 @@ import {
   refreshController,
   registerController,
   revokeSessionController,
+  usernameExistsController,
 } from "./auth.controller.js";
 
 function createAuthLimiter(limit: number) {
@@ -42,6 +43,11 @@ export function createAuthRouter(): Router {
     "/login",
     createAuthLimiter(env.AUTH_LOGIN_RATE_LIMIT_MAX),
     loginController,
+  );
+  router.get(
+    "/username-exists",
+    createAuthLimiter(env.AUTH_LOGIN_RATE_LIMIT_MAX),
+    usernameExistsController,
   );
   router.post(
     "/refresh",

@@ -210,6 +210,34 @@ describe("registration", () => {
   });
 });
 
+describe("username lookup", () => {
+  it("reports whether a normalized username exists without exposing account data", async () => {
+    await register();
+
+    const existing = await request(app)
+      .get("/api/v1/auth/username-exists")
+      .query({ username: " alice.example " });
+    const missing = await request(app)
+      .get("/api/v1/auth/username-exists")
+      .query({ username: "new_user" });
+
+    expect(existing.status).toBe(200);
+    expect(existing.body).toEqual({ success: true, data: { exists: true } });
+    expect(missing.status).toBe(200);
+    expect(missing.body).toEqual({ success: true, data: { exists: false } });
+    expect(existing.body.data).not.toHaveProperty("user");
+  });
+
+  it("rejects malformed username lookup values", async () => {
+    const response = await request(app)
+      .get("/api/v1/auth/username-exists")
+      .query({ username: "not valid" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
 describe("login and authentication", () => {
   it("logs in with a case-insensitive username or email", async () => {
     await register();
