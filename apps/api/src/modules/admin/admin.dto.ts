@@ -1,4 +1,8 @@
-import type { AdminUserDto, AdminUserListItemDto } from "@terqivo/contracts";
+import type {
+  AdminUserAppVersionDto,
+  AdminUserDto,
+  AdminUserListItemDto,
+} from "@terqivo/contracts";
 import type { Types } from "mongoose";
 
 import type { AdminUserDocument } from "./admin-user.types.js";
@@ -13,6 +17,7 @@ type AdminUserListSource = {
   role: "user" | "moderator" | "admin";
   createdAt: Date;
   lastSeenAt: Date | null;
+  appVersions: AdminUserAppVersionDto[];
 };
 
 export function toAdminUserDto(admin: AdminUserDocument): AdminUserDto {
@@ -40,5 +45,6 @@ export function toAdminUserListItemDto(
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
+    appVersions: user.appVersions,
   };
 }

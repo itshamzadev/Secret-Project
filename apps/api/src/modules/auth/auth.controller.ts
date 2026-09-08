@@ -18,10 +18,7 @@ import {
   revokeOwnedSession,
 } from "./auth.service.js";
 import { toSafeUserDto } from "../users/user.dto.js";
-import {
-  normalizeUsername,
-  usernameExists,
-} from "../users/user.service.js";
+import { normalizeUsername, usernameExists } from "../users/user.service.js";
 import {
   loginSchema,
   refreshSchema,
@@ -99,7 +96,7 @@ async function handleRefresh(
     return;
   }
 
-  const result = await refreshUserSession(refreshToken);
+  const result = await refreshUserSession(refreshToken, input);
   sendAuthResponse(response, result, 200);
 }
 

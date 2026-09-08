@@ -104,4 +104,34 @@ export const adminApi = {
       { token },
     );
   },
+
+  changeUserPassword(token: string, userId: string, password: string) {
+    return request<{ updated: true; revokedSessions: number }>(
+      `/admin/users/${userId}/password`,
+      { method: "PATCH", token, body: { password } },
+    );
+  },
+
+  setUserStatus(
+    token: string,
+    userId: string,
+    status: "active" | "suspended" | "disabled",
+  ) {
+    return request<{
+      updated: true;
+      status: "active" | "suspended" | "disabled";
+      revokedSessions: number;
+    }>(`/admin/users/${userId}/status`, {
+      method: "PATCH",
+      token,
+      body: { status },
+    });
+  },
+
+  deleteUser(token: string, userId: string) {
+    return request<{ deleted: true; revokedSessions: number }>(
+      `/admin/users/${userId}`,
+      { method: "DELETE", token },
+    );
+  },
 };

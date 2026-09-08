@@ -16,5 +16,20 @@ export const adminUsersQuerySchema = z.object({
 
 export const adminBootstrapRoleSchema = z.enum(adminRoles);
 
+export const adminUserIdParamsSchema = z.object({
+  userId: z
+    .string()
+    .trim()
+    .regex(/^[a-f\d]{24}$/i, "userId must be a valid ObjectId"),
+});
+
+export const adminPasswordChangeSchema = z.object({
+  password: z.string().min(8).max(1024),
+});
+
+export const adminUserStatusSchema = z.object({
+  status: z.enum(["active", "suspended", "disabled"]),
+});
+
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
 export type AdminUsersQuery = z.infer<typeof adminUsersQuerySchema>;

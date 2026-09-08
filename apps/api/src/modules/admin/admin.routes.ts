@@ -8,9 +8,12 @@ import {
 } from "../../middleware/authenticate-admin.js";
 import {
   adminDashboardController,
+  adminChangeUserPasswordController,
+  adminDeleteUserController,
   adminLoginController,
   adminLogoutController,
   adminMeController,
+  adminUserStatusController,
   adminUsersController,
 } from "./admin.controller.js";
 
@@ -44,6 +47,24 @@ export function createAdminRouter(): Router {
     authenticateAdmin,
     requireAdminPermission("users.view"),
     adminUsersController,
+  );
+  router.patch(
+    "/users/:userId/password",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminChangeUserPasswordController,
+  );
+  router.patch(
+    "/users/:userId/status",
+    authenticateAdmin,
+    requireAdminPermission("users.suspend"),
+    adminUserStatusController,
+  );
+  router.delete(
+    "/users/:userId",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminDeleteUserController,
   );
   return router;
 }

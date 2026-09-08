@@ -2,6 +2,7 @@ import type {
   AdminAuthenticationResponse,
   AdminDashboardDto,
   AdminPermission,
+  AdminUserListItemDto,
   AdminUserListResponse,
 } from "@terqivo/contracts";
 import { Types } from "mongoose";
@@ -11,7 +12,12 @@ import { AppError } from "../../core/errors.js";
 import { getDatabaseStatus } from "../../lib/database.js";
 import { getRedisStatus, redisClient } from "../../lib/redis.js";
 import { encodeCursor, decodeCursor } from "../../utils/cursors.js";
-import { verifyPasswordAgainstUserOrDummy } from "../auth/auth.security.js";
+import {
+  hashPassword,
+  verifyPasswordAgainstUserOrDummy,
+} from "../auth/auth.security.js";
+import { AuthSessionModel } from "../auth/auth-session.model.js";
+import { revokeAllSessionsForUser } from "../auth/auth.service.js";
 import { CallModel } from "../calls/call.model.js";
 import { ConversationModel } from "../conversations/conversation.model.js";
 import { MessageModel } from "../messages/message.model.js";
@@ -236,8 +242,57 @@ export async function listAdminUsers(
   const page = hasMore ? users.slice(0, query.limit) : users;
   const lastUser = page.at(-1);
 
+  const sessions = await AuthSessionModel.find({
+    userId: { $in: page.map((user) => user._id) },
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  })
+    .select({
+      userId: 1,
+      appVersion: 1,
+      appBuild: 1,
+      platform: 1,
+      deviceName: 1,
+      lastUsedAt: 1,
+    })
+    .sort({ lastUsedAt: -1 })
+    .lean<
+      Array<{
+        userId: Types.ObjectId;
+        appVersion?: string | null;
+        appBuild?: number | null;
+        platform:
+          "web" | "android" | "ios" | "windows" | "macos" | "linux" | "unknown";
+        deviceName: string;
+        lastUsedAt: Date;
+      }>
+    >()
+    .exec();
+  const appVersionsByUser = new Map<
+    string,
+    AdminUserListItemDto["appVersions"]
+  >();
+  for (const session of sessions) {
+    const userId = session.userId.toString();
+    const versions = appVersionsByUser.get(userId) ?? [];
+    versions.push({
+      version: session.appVersion ?? null,
+      build: session.appBuild ?? null,
+      platform: session.platform,
+      deviceName: session.deviceName,
+      lastUsedAt: session.lastUsedAt.toISOString(),
+      active: true,
+    });
+    appVersionsByUser.set(userId, versions);
+  }
+
   return {
-    users: page.map(toAdminUserListItemDto),
+    users: page.map((user) =>
+      toAdminUserListItemDto({
+        ...user,
+        appVersions: appVersionsByUser.get(user._id.toString()) ?? [],
+      }),
+    ),
     nextCursor:
       hasMore && lastUser !== undefined
         ? encodeCursor({
@@ -246,6 +301,62 @@ export async function listAdminUsers(
           })
         : null,
   };
+}
+
+function userNotFound(): AppError {
+  return new AppError({
+    code: "ADMIN_USER_NOT_FOUND",
+    message: "The user was not found.",
+    statusCode: 404,
+  });
+}
+
+async function getManagedUser(userId: string) {
+  if (!Types.ObjectId.isValid(userId)) throw userNotFound();
+  const user = await UserModel.findById(userId).exec();
+  if (user === null) throw userNotFound();
+  return user;
+}
+
+export async function changeAdminUserPassword(
+  userId: string,
+  password: string,
+): Promise<{ updated: true; revokedSessions: number }> {
+  const user = await getManagedUser(userId);
+  user.passwordHash = await hashPassword(password);
+  await user.save();
+  const revokedSessions = await revokeAllSessionsForUser(
+    userId,
+    "admin_password_change",
+  );
+  return { updated: true, revokedSessions };
+}
+
+export async function setAdminUserStatus(
+  userId: string,
+  status: "active" | "suspended" | "disabled",
+): Promise<{ updated: true; status: typeof status; revokedSessions: number }> {
+  const user = await getManagedUser(userId);
+  user.accountStatus = status;
+  await user.save();
+  const revokedSessions =
+    status === "active"
+      ? 0
+      : await revokeAllSessionsForUser(userId, "account_status_change");
+  return { updated: true, status, revokedSessions };
+}
+
+export async function deleteAdminUser(
+  userId: string,
+): Promise<{ deleted: true; revokedSessions: number }> {
+  const user = await getManagedUser(userId);
+  user.accountStatus = "disabled";
+  await user.save();
+  const revokedSessions = await revokeAllSessionsForUser(
+    userId,
+    "account_status_change",
+  );
+  return { deleted: true, revokedSessions };
 }
 
 export async function initializeAdminModels(): Promise<void> {

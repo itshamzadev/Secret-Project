@@ -34,6 +34,8 @@ const deviceFields = {
     )
     .optional(),
   platform: platformSchema.default("unknown"),
+  appVersion: z.string().trim().min(1).max(32).nullable().optional(),
+  appBuild: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
 };
 
 export const registerSchema = z.object({
@@ -66,6 +68,8 @@ export const loginSchema = z.object({
 
 export const refreshSchema = z.object({
   refreshToken: z.string().trim().min(1).max(512).optional(),
+  appVersion: z.string().trim().min(1).max(32).nullable().optional(),
+  appBuild: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
 });
 
 export const sessionIdParamsSchema = z.object({

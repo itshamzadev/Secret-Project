@@ -41,7 +41,11 @@ import {
   refreshTokenHashesMatch,
 } from "./auth.tokens.js";
 import type { DeviceMetadata, AuthResult, AuthContext } from "./auth.types.js";
-import type { LoginInput, RegisterInput } from "./auth.validation.js";
+import type {
+  LoginInput,
+  RefreshInput,
+  RegisterInput,
+} from "./auth.validation.js";
 
 const INVALID_CREDENTIALS = new AppError({
   code: "INVALID_CREDENTIALS",
@@ -105,6 +109,8 @@ async function issueSession(
     deviceId: device.deviceId,
     deviceName: device.deviceName || defaultDeviceName(device.platform),
     platform: device.platform,
+    appVersion: device.appVersion,
+    appBuild: device.appBuild,
     userAgent: device.userAgent,
     ipAddress: device.ipAddress,
     createdAt: now,
@@ -168,6 +174,8 @@ export function createDeviceMetadata(
     deviceId?: string | undefined;
     deviceName?: string | undefined;
     platform: DeviceMetadata["platform"];
+    appVersion?: string | null | undefined;
+    appBuild?: number | null | undefined;
   },
   userAgent: string | undefined,
   ipAddress: string | undefined,
@@ -176,6 +184,8 @@ export function createDeviceMetadata(
     deviceId: input.deviceId ?? null,
     deviceName: input.deviceName ?? defaultDeviceName(input.platform),
     platform: input.platform,
+    appVersion: input.appVersion ?? null,
+    appBuild: input.appBuild ?? null,
     userAgent: (userAgent ?? "unknown").slice(0, 512),
     ipAddress: (ipAddress ?? "unknown").slice(0, 128),
   };
@@ -275,6 +285,7 @@ export async function loginUser(
 
 export async function refreshUserSession(
   refreshToken: string,
+  appInfo?: Pick<RefreshInput, "appVersion" | "appBuild">,
 ): Promise<AuthResult> {
   const sessionId = extractSessionId(refreshToken);
   if (sessionId === null) {
@@ -312,6 +323,12 @@ export async function refreshUserSession(
         lastUsedAt: now,
         lastRefreshAt: now,
         expiresAt: getRefreshTokenExpiry(),
+        ...(appInfo?.appVersion !== undefined
+          ? { appVersion: appInfo.appVersion }
+          : {}),
+        ...(appInfo?.appBuild !== undefined
+          ? { appBuild: appInfo.appBuild }
+          : {}),
       },
     },
     { returnDocument: "after" },
@@ -435,6 +452,33 @@ export async function revokeAllSessions(context: AuthContext): Promise<number> {
         revokeReason: "logout_all",
       },
     },
+  ).exec();
+
+  for (const session of activeSessions) {
+    disconnectSessionSockets(session.sessionId);
+  }
+
+  return result.modifiedCount;
+}
+
+export async function revokeAllSessionsForUser(
+  userId: string,
+  reason: RevokeReason,
+): Promise<number> {
+  if (!Types.ObjectId.isValid(userId)) return 0;
+
+  const objectId = new Types.ObjectId(userId);
+  const activeSessions = await AuthSessionModel.find({
+    userId: objectId,
+    revokedAt: null,
+  })
+    .select({ sessionId: 1 })
+    .lean<Array<{ sessionId: string }>>()
+    .exec();
+
+  const result = await AuthSessionModel.updateMany(
+    { userId: objectId, revokedAt: null },
+    { $set: { revokedAt: new Date(), revokeReason: reason } },
   ).exec();
 
   for (const session of activeSessions) {

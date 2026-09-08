@@ -3,7 +3,11 @@ import { model, Schema } from "mongoose";
 import type { HydratedDocument, Types } from "mongoose";
 
 export type RevokeReason =
-  "logout" | "logout_all" | "refresh_token_reuse" | "account_status_change";
+  | "logout"
+  | "logout_all"
+  | "refresh_token_reuse"
+  | "account_status_change"
+  | "admin_password_change";
 
 export interface AuthSessionEntity {
   userId: Types.ObjectId;
@@ -12,6 +16,8 @@ export interface AuthSessionEntity {
   deviceId: string | null;
   deviceName: string;
   platform: ClientPlatform;
+  appVersion: string | null;
+  appBuild: number | null;
   userAgent: string;
   ipAddress: string;
   createdAt: Date;
@@ -57,6 +63,16 @@ const authSessionSchema = new Schema<AuthSessionEntity>(
       enum: [...clientPlatforms],
       required: true,
     },
+    appVersion: {
+      type: String,
+      default: null,
+      maxlength: 32,
+    },
+    appBuild: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     userAgent: {
       type: String,
       required: true,
@@ -98,6 +114,7 @@ const authSessionSchema = new Schema<AuthSessionEntity>(
         "logout_all",
         "refresh_token_reuse",
         "account_status_change",
+        "admin_password_change",
       ],
       default: null,
     },

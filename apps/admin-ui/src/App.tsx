@@ -94,6 +94,17 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+function formatAppVersions(user: AdminUserListItemDto): string {
+  if (user.appVersions.length === 0) return "Not reported";
+  return user.appVersions
+    .map((device) => {
+      const version = device.version ?? "Unknown";
+      const build = device.build === null ? "" : ` · ${device.build}`;
+      return `${version}${build}`;
+    })
+    .join(", ");
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof AdminApiError) return error.message;
   return "Something went wrong. Please try again.";
@@ -525,6 +536,10 @@ function UsersPage({ token }: { token: string }) {
   const [pages, setPages] = useState<AdminUserListResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [passwordUser, setPasswordUser] = useState<AdminUserListItemDto | null>(
+    null,
+  );
+  const [actionBusyUserId, setActionBusyUserId] = useState<string | null>(null);
 
   async function loadUsers(cursor?: string): Promise<void> {
     setLoading(true);
@@ -554,6 +569,50 @@ function UsersPage({ token }: { token: string }) {
 
   const users = useMemo(() => pages.flatMap((page) => page.users), [pages]);
   const nextCursor = pages.at(-1)?.nextCursor ?? null;
+
+  async function setUserStatus(
+    user: AdminUserListItemDto,
+    nextStatus: "active" | "suspended",
+  ): Promise<void> {
+    const action = nextStatus === "suspended" ? "suspend" : "restore";
+    if (
+      !window.confirm(
+        `${action[0]?.toUpperCase()}${action.slice(1)} @${user.username}?`,
+      )
+    ) {
+      return;
+    }
+    setActionBusyUserId(user.id);
+    setError(null);
+    try {
+      await adminApi.setUserStatus(token, user.id, nextStatus);
+      await loadUsers();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setActionBusyUserId(null);
+    }
+  }
+
+  async function deleteUser(user: AdminUserListItemDto): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete @${user.username}? The account will be disabled and all active sessions will be signed out.`,
+      )
+    ) {
+      return;
+    }
+    setActionBusyUserId(user.id);
+    setError(null);
+    try {
+      await adminApi.deleteUser(token, user.id);
+      await loadUsers();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setActionBusyUserId(null);
+    }
+  }
 
   function submitSearch(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -619,25 +678,43 @@ function UsersPage({ token }: { token: string }) {
                 <th>User</th>
                 <th>Contact</th>
                 <th>Status</th>
+                <th>App version</th>
                 <th>Last seen</th>
                 <th>Joined</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && users.length === 0 ? (
                 <tr>
-                  <td className="table-state" colSpan={5}>
+                  <td className="table-state" colSpan={7}>
                     Loading users…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td className="table-state" colSpan={5}>
+                  <td className="table-state" colSpan={7}>
                     No users match this view.
                   </td>
                 </tr>
               ) : (
-                users.map((user) => <UserRow key={user.id} user={user} />)
+                users.map((user) => (
+                  <UserRow
+                    busy={actionBusyUserId === user.id}
+                    key={user.id}
+                    onDelete={() => void deleteUser(user)}
+                    onPassword={() => setPasswordUser(user)}
+                    onStatus={() =>
+                      void setUserStatus(
+                        user,
+                        user.accountStatus === "suspended"
+                          ? "active"
+                          : "suspended",
+                      )
+                    }
+                    user={user}
+                  />
+                ))
               )}
             </tbody>
           </table>
@@ -656,11 +733,34 @@ function UsersPage({ token }: { token: string }) {
           </div>
         ) : null}
       </section>
+      {passwordUser !== null ? (
+        <PasswordChangeDialog
+          onClose={() => setPasswordUser(null)}
+          onSaved={() => {
+            setPasswordUser(null);
+            void loadUsers();
+          }}
+          token={token}
+          user={passwordUser}
+        />
+      ) : null}
     </div>
   );
 }
 
-function UserRow({ user }: { user: AdminUserListItemDto }) {
+function UserRow({
+  user,
+  busy,
+  onPassword,
+  onStatus,
+  onDelete,
+}: {
+  user: AdminUserListItemDto;
+  busy: boolean;
+  onPassword: () => void;
+  onStatus: () => void;
+  onDelete: () => void;
+}) {
   return (
     <tr>
       <td>
@@ -682,9 +782,146 @@ function UserRow({ user }: { user: AdminUserListItemDto }) {
           {user.accountStatus}
         </span>
       </td>
+      <td>
+        <span className="version-cell" title={formatAppVersions(user)}>
+          {formatAppVersions(user)}
+        </span>
+      </td>
       <td>{formatDate(user.lastSeenAt)}</td>
       <td>{formatDate(user.createdAt)}</td>
+      <td>
+        <div className="user-actions">
+          <button
+            className="table-action"
+            disabled={busy}
+            onClick={onPassword}
+            type="button"
+          >
+            Password
+          </button>
+          <button
+            className="table-action"
+            disabled={busy || user.accountStatus === "disabled"}
+            onClick={onStatus}
+            type="button"
+          >
+            {user.accountStatus === "suspended" ? "Restore" : "Suspend"}
+          </button>
+          <button
+            className="table-action table-action-danger"
+            disabled={busy || user.accountStatus === "disabled"}
+            onClick={onDelete}
+            type="button"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
     </tr>
+  );
+}
+
+function PasswordChangeDialog({
+  token,
+  user,
+  onClose,
+  onSaved,
+}: {
+  token: string;
+  user: AdminUserListItemDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await adminApi.changeUserPassword(token, user.id, password);
+      onSaved();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby="password-dialog-title"
+        className="dialog-card"
+        role="dialog"
+      >
+        <div className="dialog-heading">
+          <div>
+            <span className="section-kicker">ACCOUNT SECURITY</span>
+            <h3 id="password-dialog-title">Change password</h3>
+            <p>
+              @{user.username} will need to sign in again on active devices.
+            </p>
+          </div>
+          <button
+            aria-label="Close"
+            className="icon-button"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+        <form className="auth-form" onSubmit={(event) => void submit(event)}>
+          <label>
+            <span>New password</span>
+            <input
+              autoComplete="new-password"
+              minLength={8}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          <label>
+            <span>Confirm password</span>
+            <input
+              autoComplete="new-password"
+              minLength={8}
+              onChange={(event) => setConfirmation(event.target.value)}
+              required
+              type="password"
+              value={confirmation}
+            />
+          </label>
+          {error !== null ? <p className="form-error">{error}</p> : null}
+          <div className="dialog-actions">
+            <button
+              className="secondary-button"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button className="primary-button" disabled={busy} type="submit">
+              {busy ? "Saving…" : "Save password"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 

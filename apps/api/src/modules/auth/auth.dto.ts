@@ -11,6 +11,8 @@ export function toAuthSessionDto(
     deviceId: session.deviceId,
     deviceName: session.deviceName,
     platform: session.platform,
+    appVersion: session.appVersion ?? null,
+    appBuild: session.appBuild ?? null,
     createdAt: session.createdAt.toISOString(),
     lastUsedAt: session.lastUsedAt.toISOString(),
     lastRefreshAt: session.lastRefreshAt.toISOString(),

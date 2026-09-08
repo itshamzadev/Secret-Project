@@ -46,6 +46,8 @@ export interface AuthSessionDto {
   deviceId: string | null;
   deviceName: string;
   platform: ClientPlatform;
+  appVersion?: string | null;
+  appBuild?: number | null;
   createdAt: string;
   lastUsedAt: string;
   lastRefreshAt: string;
@@ -662,6 +664,16 @@ export interface AdminUserListItemDto {
   role: SafeUserDto["role"];
   createdAt: string;
   lastSeenAt: string | null;
+  appVersions: AdminUserAppVersionDto[];
+}
+
+export interface AdminUserAppVersionDto {
+  version: string | null;
+  build: number | null;
+  platform: ClientPlatform;
+  deviceName: string;
+  lastUsedAt: string;
+  active: boolean;
 }
 
 export interface AdminUserListResponse {
