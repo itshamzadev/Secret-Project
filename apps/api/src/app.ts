@@ -38,6 +38,9 @@ import { createSearchRouter } from "./modules/search/search.routes.js";
 import { createAiRouter } from "./modules/ai/ai.routes.js";
 import { createAdminRouter } from "./modules/admin/admin.routes.js";
 import { createE2EFERouter } from "./modules/e2efe/e2efe.routes.js";
+import { createGroupRouter } from "./modules/groups/group.routes.js";
+import { createChannelRouter } from "./modules/channels/channel.routes.js";
+import { createStatusRouter } from "./modules/status/status.routes.js";
 
 export interface CreateAppOptions {
   getHealthSnapshot?: HealthSnapshotProvider;
@@ -152,6 +155,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/ai", createAiRouter());
   apiV1Router.use("/admin", createAdminRouter());
   apiV1Router.use("/e2efe", createE2EFERouter());
+  apiV1Router.use("/groups", createGroupRouter());
+  apiV1Router.use("/channels", createChannelRouter());
+  apiV1Router.use("/status", createStatusRouter());
   app.use("/api/v1", apiV1Router);
   logger.info(
     { routePrefix: "/api/v1", loginRoute: "POST /api/v1/auth/login" },

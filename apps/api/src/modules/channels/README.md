@@ -1,3 +1,4 @@
 # Channels
 
-Reserved for future public and private channel features.
+Authenticated users can create public text channels, follow/unfollow them, and
+publish text posts from the channel owner account.

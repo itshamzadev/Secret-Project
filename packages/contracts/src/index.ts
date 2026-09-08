@@ -80,6 +80,48 @@ export interface ContactDto {
   updatedAt: string;
 }
 
+export interface GroupDto {
+  id: string;
+  name: string;
+  description: string;
+  owner: ContactUserDto;
+  members: ContactUserDto[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelPostDto {
+  id: string;
+  channelId: string;
+  author: ContactUserDto;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelDto {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  owner: ContactUserDto;
+  followerCount: number;
+  isFollowing: boolean;
+  latestPost: ChannelPostDto | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StatusDto {
+  id: string;
+  author: ContactUserDto;
+  text: string;
+  viewed: boolean;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export type ConversationType = "direct";
 
 export const messageTypes = [

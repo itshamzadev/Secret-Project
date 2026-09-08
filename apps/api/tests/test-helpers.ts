@@ -27,6 +27,12 @@ import { E2EFEDeviceModel } from "../src/modules/e2efe/e2efe-device.model.js";
 import { E2EFEMessageEnvelopeModel } from "../src/modules/e2efe/e2efe-message-envelope.model.js";
 import { E2EFEStagedMediaModel } from "../src/modules/media/e2efe-media-upload.model.js";
 import { initializeMediaModels } from "../src/modules/media/media.service.js";
+import { GroupModel } from "../src/modules/groups/group.model.js";
+import { initializeGroupModels } from "../src/modules/groups/group.service.js";
+import { ChannelModel, ChannelPostModel } from "../src/modules/channels/channel.model.js";
+import { initializeChannelModels } from "../src/modules/channels/channel.service.js";
+import { StatusModel } from "../src/modules/status/status.model.js";
+import { initializeStatusModels } from "../src/modules/status/status.service.js";
 
 export interface TestRegisterPayload {
   username: string;
@@ -95,6 +101,9 @@ export async function connectTestData(): Promise<void> {
   await initializeBlockModels();
   await initializeE2EFEModels();
   await initializeMediaModels();
+  await initializeGroupModels();
+  await initializeChannelModels();
+  await initializeStatusModels();
 }
 
 export async function clearTestData(): Promise<void> {
@@ -112,6 +121,10 @@ export async function clearTestData(): Promise<void> {
     E2EFEDeviceModel.deleteMany({}),
     E2EFEMessageEnvelopeModel.deleteMany({}),
     E2EFEStagedMediaModel.deleteMany({}),
+    GroupModel.deleteMany({}),
+    ChannelModel.deleteMany({}),
+    ChannelPostModel.deleteMany({}),
+    StatusModel.deleteMany({}),
   ]);
   if (redisClient.isReady) {
     await redisClient.del(callTimeoutKeys.timeoutSetKey);
