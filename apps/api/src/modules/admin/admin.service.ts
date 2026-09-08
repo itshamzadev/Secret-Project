@@ -288,10 +288,10 @@ export async function listAdminUsers(
 
   return {
     users: page.map((user) =>
-      toAdminUserListItemDto({
-        ...user,
-        appVersions: appVersionsByUser.get(user._id.toString()) ?? [],
-      }),
+      toAdminUserListItemDto(
+        user,
+        appVersionsByUser.get(user._id.toString()) ?? [],
+      ),
     ),
     nextCursor:
       hasMore && lastUser !== undefined

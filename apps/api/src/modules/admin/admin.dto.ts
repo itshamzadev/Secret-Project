@@ -17,7 +17,6 @@ type AdminUserListSource = {
   role: "user" | "moderator" | "admin";
   createdAt: Date;
   lastSeenAt: Date | null;
-  appVersions: AdminUserAppVersionDto[];
 };
 
 export function toAdminUserDto(admin: AdminUserDocument): AdminUserDto {
@@ -34,6 +33,7 @@ export function toAdminUserDto(admin: AdminUserDocument): AdminUserDto {
 
 export function toAdminUserListItemDto(
   user: AdminUserListSource,
+  appVersions: AdminUserAppVersionDto[] = [],
 ): AdminUserListItemDto {
   return {
     id: user._id.toString(),
@@ -45,6 +45,6 @@ export function toAdminUserListItemDto(
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
-    appVersions: user.appVersions,
+    appVersions,
   };
 }
