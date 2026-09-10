@@ -58,6 +58,8 @@ const userSchema = new Schema<UserEntity>(
       default: null,
       maxlength: 2048,
     },
+    avatarStorageKey: { type: String, default: null, maxlength: 128 },
+    avatarMimeType: { type: String, default: null, maxlength: 100 },
     bio: {
       type: String,
       default: null,

@@ -4,7 +4,10 @@ import { toContactUserDto } from "../contacts/contact.dto.js";
 import type { UserDocument } from "../users/user.types.js";
 import type { ChannelDocument, ChannelPostDocument } from "./channel.types.js";
 
-export function toChannelPostDto(post: ChannelPostDocument, author: UserDocument): ChannelPostDto {
+export function toChannelPostDto(
+  post: ChannelPostDocument,
+  author: UserDocument,
+): ChannelPostDto {
   return {
     id: post._id.toString(),
     channelId: post.channelId.toString(),
@@ -26,9 +29,12 @@ export function toChannelDto(
     name: channel.name,
     handle: channel.handle,
     description: channel.description,
+    avatarUrl: channel.avatarUrl,
     owner: toContactUserDto(owner),
     followerCount: channel.followerIds.length,
-    isFollowing: channel.followerIds.some((id) => id.toString() === currentUserId),
+    isFollowing: channel.followerIds.some(
+      (id) => id.toString() === currentUserId,
+    ),
     latestPost,
     createdAt: channel.createdAt.toISOString(),
     updatedAt: channel.updatedAt.toISOString(),

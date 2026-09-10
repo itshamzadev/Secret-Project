@@ -19,4 +19,11 @@ export const createGroupSchema = z.object({
   memberUserIds: z.array(objectIdSchema).max(99).default([]),
 });
 
+export const groupIdParamsSchema = z.object({ groupId: objectIdSchema });
+export const updateGroupSchema = z.object({
+  name: safeText(80, 1),
+  description: safeText(500).default(""),
+  memberUserIds: z.array(objectIdSchema).max(99).default([]),
+});
+
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;

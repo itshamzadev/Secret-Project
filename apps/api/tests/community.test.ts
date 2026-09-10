@@ -122,9 +122,65 @@ describe("groups, channels, and status", () => {
       .set(authHeader(bob.accessToken));
     expect(viewed.status).toBe(200);
 
+    const aliceStatuses = await request(app)
+      .get("/api/v1/status")
+      .set(authHeader(alice.accessToken));
+    expect(aliceStatuses.status).toBe(200);
+    expect(aliceStatuses.body.data.statuses[0]).toMatchObject({
+      viewerCount: 1,
+      viewers: [expect.objectContaining({ id: bob.user.id })],
+    });
+
     const deleted = await request(app)
       .delete(`/api/v1/status/${statusId}`)
       .set(authHeader(alice.accessToken));
     expect(deleted.status).toBe(200);
+  });
+
+  it("stores and serves an image status without exposing it to unrelated users", async () => {
+    const alice = authData(await register());
+    const bob = authData(await register({
+      username: "Bob.MediaStatus",
+      name: "Bob Media Status",
+      phone: "+14155550105",
+      email: "bob-media-status@example.com",
+    }));
+    await request(app)
+      .post("/api/v1/contacts")
+      .set(authHeader(bob.accessToken))
+      .send({ identifier: alice.user.username });
+
+    const image = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const created = await request(app)
+      .post("/api/v1/status/media")
+      .set(authHeader(alice.accessToken))
+      .set("Content-Type", "image/png")
+      .set("x-file-name", "status.png")
+      .query({ type: "image", width: 1, height: 1 })
+      .send(image);
+    expect(created.status).toBe(201);
+    expect(created.body.data.status).toMatchObject({
+      type: "image",
+      text: "",
+      media: { mimeType: "image/png", width: 1, height: 1 },
+    });
+
+    const statusId = created.body.data.status.id as string;
+    const listed = await request(app)
+      .get("/api/v1/status")
+      .set(authHeader(bob.accessToken));
+    expect(listed.status).toBe(200);
+    const mediaStatus = listed.body.data.statuses.find((status: { id: string }) => status.id === statusId);
+    expect(mediaStatus).toMatchObject({ type: "image", media: { url: `/api/v1/status/${statusId}/media` } });
+
+    const downloaded = await request(app)
+      .get(`/api/v1/status/${statusId}/media`)
+      .set(authHeader(bob.accessToken));
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers["content-type"]).toContain("image/png");
+    expect(downloaded.body).toEqual(image);
   });
 });

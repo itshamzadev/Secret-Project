@@ -20,7 +20,7 @@ interface RegisterPayload {
   username: string;
   name: string;
   email?: string;
-  phone: string;
+  phone?: string;
   password: string;
   deviceId?: string;
   deviceName?: string;
@@ -61,7 +61,9 @@ function authData(response: { body: { data: unknown } }) {
     user: {
       id: string;
       username: string;
-      email: string;
+      email: string | null;
+      phone: string | null;
+      emailVerified: boolean;
       accountStatus: string;
     };
     session: { id: string; lastRefreshAt: string; expiresAt: string };
@@ -195,6 +197,25 @@ describe("registration", () => {
     expect(registration.status).toBe(201);
     expect(data.user.email).toBeNull();
     expect(login.status).toBe(200);
+  });
+
+  it("supports email-first registration without verification", async () => {
+    const emailRegistration = registrationPayload({
+      username: "Email.User",
+      name: "Email User",
+      email: "email-first@example.com",
+      phone: "+14155550112",
+    });
+    delete emailRegistration.phone;
+    const registration = await request(app)
+      .post("/api/v1/auth/register")
+      .send(emailRegistration);
+
+    expect(registration.status).toBe(201);
+    const data = authData(registration);
+    expect(data.user.email).toBe("email-first@example.com");
+    expect(data.user.phone).toBeNull();
+    expect(data.user.emailVerified).toBe(false);
   });
 
   it("rejects a normalized phone conflict", async () => {

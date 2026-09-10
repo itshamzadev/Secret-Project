@@ -3,6 +3,7 @@ import type {
   AdminDashboardDto,
   AdminUserDto,
   AdminUserListResponse,
+  AdminReportListResponse,
 } from "@terqivo/contracts";
 
 import { adminEnv } from "./config/env";
@@ -132,6 +133,25 @@ export const adminApi = {
     return request<{ deleted: true; revokedSessions: number }>(
       `/admin/users/${userId}`,
       { method: "DELETE", token },
+    );
+  },
+
+  reports(token: string, status?: "open" | "resolved" | "dismissed") {
+    const suffix =
+      status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
+    return request<AdminReportListResponse>(`/admin/reports${suffix}`, {
+      token,
+    });
+  },
+
+  updateReport(
+    token: string,
+    reportId: string,
+    status: "open" | "resolved" | "dismissed",
+  ) {
+    return request<{ report: AdminReportListResponse["reports"][number] }>(
+      `/admin/reports/${reportId}`,
+      { method: "PATCH", token, body: { status } },
     );
   },
 };

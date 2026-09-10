@@ -84,6 +84,7 @@ export interface GroupDto {
   id: string;
   name: string;
   description: string;
+  avatarUrl: string | null;
   owner: ContactUserDto;
   members: ContactUserDto[];
   memberCount: number;
@@ -105,6 +106,7 @@ export interface ChannelDto {
   name: string;
   handle: string;
   description: string;
+  avatarUrl: string | null;
   owner: ContactUserDto;
   followerCount: number;
   isFollowing: boolean;
@@ -113,13 +115,80 @@ export interface ChannelDto {
   updatedAt: string;
 }
 
+export type StatusType = "text" | "image" | "video" | "audio";
+
+export interface StatusMediaDto {
+  url: string;
+  mimeType: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+}
+
 export interface StatusDto {
   id: string;
   author: ContactUserDto;
+  type: StatusType;
   text: string;
+  media: StatusMediaDto | null;
   viewed: boolean;
+  viewerCount: number;
+  viewers: ContactUserDto[];
   createdAt: string;
   expiresAt: string;
+}
+
+export const reportReasons = [
+  "spam",
+  "harassment",
+  "abuse",
+  "impersonation",
+  "other",
+] as const;
+export type ReportReason = (typeof reportReasons)[number];
+export type ReportTargetType = "user" | "message" | "group" | "channel";
+export type ReportStatus = "open" | "resolved" | "dismissed";
+
+export interface ReportDto {
+  id: string;
+  targetType: ReportTargetType;
+  conversationId: string | null;
+  messageId: string | null;
+  groupId: string | null;
+  channelId: string | null;
+  reason: ReportReason;
+  details: string | null;
+  status: ReportStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminReportDto extends ReportDto {
+  reporter: AdminReportUserDto;
+  targetUser: AdminReportUserDto | null;
+  resolvedByAdminId: string | null;
+  resolvedAt: string | null;
+}
+
+export interface AdminReportUserDto {
+  id: string;
+  username: string;
+  displayName: string;
+}
+
+export interface AdminReportListResponse {
+  reports: AdminReportDto[];
+}
+
+export type PrivacyVisibility = "everyone" | "contacts" | "nobody";
+
+export interface PrivacySettingsDto {
+  profilePhoto: PrivacyVisibility;
+  lastSeen: PrivacyVisibility;
+  readReceipts: boolean;
+  messageRequests: "everyone" | "contacts";
+  updatedAt: string;
 }
 
 export type ConversationType = "direct";

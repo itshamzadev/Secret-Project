@@ -198,14 +198,17 @@ export async function registerUser(
   const usernameNormalized = normalizeUsername(input.username);
   const emailNormalized =
     input.email === undefined ? null : normalizeEmail(input.email);
-  const phoneNormalized = normalizePhone(input.phone);
+  const phoneNormalized =
+    input.phone === undefined ? null : normalizePhone(input.phone);
 
   const [usernameConflict, emailConflict, phoneConflict] = await Promise.all([
     usernameExists(usernameNormalized),
     emailNormalized === null
       ? Promise.resolve(false)
       : emailExists(emailNormalized),
-    phoneExists(phoneNormalized),
+    phoneNormalized === null
+      ? Promise.resolve(false)
+      : phoneExists(phoneNormalized),
   ]);
 
   if (usernameConflict) {

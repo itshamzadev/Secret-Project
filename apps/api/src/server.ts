@@ -16,10 +16,12 @@ import { initializeAdminModels } from "./modules/admin/admin.service.js";
 import { initializeMediaStorage } from "./modules/media/media.storage.js";
 import { initializeMediaModels } from "./modules/media/media.service.js";
 import { initializeBlockModels } from "./modules/privacy/block.service.js";
+import { initializePrivacyModels } from "./modules/privacy/privacy.service.js";
 import { initializeE2EFEModels } from "./modules/e2efe/e2efe.service.js";
 import { initializeGroupModels } from "./modules/groups/group.service.js";
 import { initializeChannelModels } from "./modules/channels/channel.service.js";
 import { initializeStatusModels } from "./modules/status/status.service.js";
+import { initializeReportModels } from "./modules/reports/report.service.js";
 import { createSocketServer, type SocketRuntime } from "./sockets/index.js";
 
 const app = createApp();
@@ -77,6 +79,7 @@ export async function startServer(): Promise<void> {
     await initializeCallModels();
     await initializeNotificationModels();
     await initializeBlockModels();
+    await initializePrivacyModels();
     await initializeAdminModels();
     await initializeMediaStorage();
     await initializeE2EFEModels();
@@ -84,6 +87,7 @@ export async function startServer(): Promise<void> {
     await initializeGroupModels();
     await initializeChannelModels();
     await initializeStatusModels();
+    await initializeReportModels();
     socketRuntime = await createSocketServer(httpServer);
 
     await new Promise<void>((resolve, reject) => {

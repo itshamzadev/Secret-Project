@@ -4,6 +4,9 @@ export interface ChannelEntity {
   name: string;
   handle: string;
   description: string;
+  avatarUrl: string | null;
+  avatarStorageKey: string | null;
+  avatarMimeType: string | null;
   ownerId: Types.ObjectId;
   followerIds: Types.ObjectId[];
   createdAt: Date;

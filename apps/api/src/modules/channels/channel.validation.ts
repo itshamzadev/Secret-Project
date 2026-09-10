@@ -24,6 +24,10 @@ export const createChannelSchema = z.object({
 });
 
 export const channelIdParamsSchema = z.object({ channelId: objectIdSchema });
+export const updateChannelSchema = z.object({
+  name: safeText(80, 1),
+  description: safeText(500).default(""),
+});
 export const createChannelPostSchema = z.object({ text: safeText(4000, 1) });
 
 export type CreateChannelInput = z.infer<typeof createChannelSchema>;

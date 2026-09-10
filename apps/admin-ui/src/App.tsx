@@ -2,6 +2,7 @@ import type {
   AdminDashboardDto,
   AdminUserListItemDto,
   AdminUserListResponse,
+  AdminReportDto,
 } from "@terqivo/contracts";
 import {
   Navigate,
@@ -28,6 +29,7 @@ type IconName =
   | "check"
   | "chevron"
   | "grid"
+  | "flag"
   | "logout"
   | "menu"
   | "search"
@@ -40,6 +42,7 @@ const iconPaths: Record<IconName, string> = {
   check: "m5 12 4 4L19 6",
   chevron: "m9 18 6-6-6-6",
   grid: "M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z",
+  flag: "M5 21V4m0 0c4-3 7 3 14 0v9c-7 3-10-3-14 0",
   logout:
     "M10 17l5-5-5-5m5 5H3m13-7V4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2m13 12v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2",
   menu: "M4 6h16M4 12h16M4 18h16",
@@ -238,8 +241,15 @@ function AdminShell({
   const canViewUsers =
     session.admin.role === "super_admin" ||
     session.admin.permissions.includes("users.view");
+  const canViewReports =
+    session.admin.role === "super_admin" ||
+    session.admin.permissions.includes("reports.view");
 
-  const pageTitle = location.pathname.endsWith("/users") ? "Users" : "Overview";
+  const pageTitle = location.pathname.endsWith("/users")
+    ? "Users"
+    : location.pathname.endsWith("/reports")
+      ? "Reports"
+      : "Overview";
 
   async function logout(): Promise<void> {
     setLogoutBusy(true);
@@ -267,6 +277,12 @@ function AdminShell({
             <NavLink className="side-link" to="/users">
               <Icon name="users" />
               Users
+            </NavLink>
+          ) : null}
+          {canViewReports ? (
+            <NavLink className="side-link" to="/reports">
+              <Icon name="flag" />
+              Reports
             </NavLink>
           ) : null}
         </nav>
@@ -925,6 +941,217 @@ function PasswordChangeDialog({
   );
 }
 
+function ReportsPage({ token }: { token: string }) {
+  const [status, setStatus] = useState<
+    "open" | "resolved" | "dismissed" | "all"
+  >("open");
+  const [reports, setReports] = useState<AdminReportDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadReports(): Promise<void> {
+    setLoading(true);
+    try {
+      const result = await adminApi.reports(
+        token,
+        status === "all" ? undefined : status,
+      );
+      setReports(result.reports);
+      setError(null);
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadReports();
+  }, [status, token]);
+
+  async function updateReport(
+    report: AdminReportDto,
+    nextStatus: "resolved" | "dismissed",
+  ): Promise<void> {
+    setBusyId(report.id);
+    setError(null);
+    try {
+      await adminApi.updateReport(token, report.id, nextStatus);
+      await loadReports();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+      setBusyId(null);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="page-stack">
+      <section className="welcome-row compact-welcome">
+        <div>
+          <span className="section-kicker">MODERATION</span>
+          <h2>Reports from the community.</h2>
+          <p>Review who reported what, then resolve or dismiss each case.</p>
+        </div>
+        <span className="count-chip">{formatNumber(reports.length)} shown</span>
+      </section>
+      <section className="panel directory-panel">
+        <div className="directory-toolbar">
+          <label className="status-filter">
+            <span>Status</span>
+            <select
+              aria-label="Filter reports"
+              onChange={(event) =>
+                setStatus(event.target.value as typeof status)
+              }
+              value={status}
+            >
+              <option value="open">Open</option>
+              <option value="resolved">Resolved</option>
+              <option value="dismissed">Dismissed</option>
+              <option value="all">All reports</option>
+            </select>
+          </label>
+          <button
+            className="secondary-button"
+            disabled={loading}
+            onClick={() => void loadReports()}
+            type="button"
+          >
+            Refresh
+          </button>
+        </div>
+        {error !== null ? <div className="inline-error">{error}</div> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Reporter</th>
+                <th>Reported account</th>
+                <th>Reason</th>
+                <th>Context</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && reports.length === 0 ? (
+                <tr>
+                  <td className="table-state" colSpan={6}>
+                    Loading reports…
+                  </td>
+                </tr>
+              ) : reports.length === 0 ? (
+                <tr>
+                  <td className="table-state" colSpan={6}>
+                    No reports in this view.
+                  </td>
+                </tr>
+              ) : (
+                reports.map((report) => (
+                  <ReportRow
+                    busy={busyId === report.id}
+                    key={report.id}
+                    onDismiss={() => void updateReport(report, "dismissed")}
+                    onResolve={() => void updateReport(report, "resolved")}
+                    report={report}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReportRow({
+  report,
+  busy,
+  onResolve,
+  onDismiss,
+}: {
+  report: AdminReportDto;
+  busy: boolean;
+  onResolve: () => void;
+  onDismiss: () => void;
+}) {
+  const context =
+    report.messageId !== null
+      ? "Message"
+      : report.conversationId !== null
+        ? "Conversation"
+        : report.targetType;
+  return (
+    <tr>
+      <td>
+        <div className="user-cell">
+          <span className="user-avatar">
+            {initials(report.reporter.displayName)}
+          </span>
+          <span>
+            <strong>{report.reporter.displayName}</strong>
+            <small>@{report.reporter.username}</small>
+          </span>
+        </div>
+      </td>
+      <td>
+        {report.targetUser === null ? (
+          "—"
+        ) : (
+          <span className="user-cell">
+            <span>
+              <strong>{report.targetUser.displayName}</strong>
+              <small>@{report.targetUser.username}</small>
+            </span>
+          </span>
+        )}
+      </td>
+      <td>
+        <span className="account-status account-suspended">
+          {report.reason}
+        </span>
+      </td>
+      <td>
+        <span className="contact-cell">
+          {context}
+          {report.details === null ? "" : ` · ${report.details}`}
+        </span>
+      </td>
+      <td>{formatDate(report.createdAt)}</td>
+      <td>
+        <div className="user-actions">
+          {report.status === "open" ? (
+            <>
+              <button
+                className="table-action"
+                disabled={busy}
+                onClick={onResolve}
+                type="button"
+              >
+                Resolve
+              </button>
+              <button
+                className="table-action table-action-danger"
+                disabled={busy}
+                onClick={onDismiss}
+                type="button"
+              >
+                Dismiss
+              </button>
+            </>
+          ) : (
+            <span className="contact-cell">{report.status}</span>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function PageLoading() {
   return (
     <div className="page-stack">
@@ -1029,6 +1256,10 @@ export default function App() {
         <Route
           element={<UsersPage token={session?.accessToken ?? ""} />}
           path="/users"
+        />
+        <Route
+          element={<ReportsPage token={session?.accessToken ?? ""} />}
+          path="/reports"
         />
       </Route>
       <Route

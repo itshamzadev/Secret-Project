@@ -28,6 +28,8 @@ import { publishEncryptedMessageCreated } from "./message.events.js";
 import { publishEncryptedMessageUpdated } from "./message.events.js";
 import { getMessageActionContext } from "./message.service.js";
 import { isMongoDuplicateKeyError } from "../../utils/mongo.js";
+import { env } from "../../config/env.js";
+import { logger } from "../../lib/logger.js";
 
 function e2efeError(
   code: string,
@@ -167,6 +169,19 @@ async function sendEncryptedPayload(
     .select({ deviceId: 1 })
     .exec();
   if (recipientDevices.length === 0) {
+    logger.warn(
+      {
+        event: "e2efe_recipient_not_ready",
+        conversationId,
+        senderId: context.userId,
+        recipientId: recipientId.toString(),
+        e2efeVersion: input.e2efeVersion,
+        recipientDevicesLength: recipientDevices.length,
+        nodeEnv: env.NODE_ENV,
+        sourceCommit: process.env.SOURCE_COMMIT ?? "unknown",
+      },
+      "E2EFE recipient readiness check failed",
+    );
     throw e2efeError(
       "E2EFE_RECIPIENT_NOT_READY",
       "The recipient has not enabled encrypted messaging yet.",
@@ -421,6 +436,19 @@ export async function editEncryptedMessage(
     }
   }
   if (recipientDevices.length === 0) {
+    logger.warn(
+      {
+        event: "e2efe_recipient_not_ready",
+        conversationId: message.conversationId.toString(),
+        senderId: context.userId,
+        recipientId: recipientId.toString(),
+        e2efeVersion: input.e2efeVersion,
+        recipientDevicesLength: recipientDevices.length,
+        nodeEnv: env.NODE_ENV,
+        sourceCommit: process.env.SOURCE_COMMIT ?? "unknown",
+      },
+      "E2EFE recipient readiness check failed",
+    );
     throw e2efeError(
       "E2EFE_RECIPIENT_NOT_READY",
       "The recipient has no compatible encrypted devices.",

@@ -18,6 +18,7 @@ export function toGroupDto(
     id: group._id.toString(),
     name: group.name,
     description: group.description,
+    avatarUrl: group.avatarUrl,
     owner: toContactUserDto(owner),
     members,
     memberCount: group.memberIds.length,

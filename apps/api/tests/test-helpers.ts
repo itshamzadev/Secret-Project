@@ -22,6 +22,8 @@ import { PushDeviceModel } from "../src/modules/notifications/push-device.model.
 import { initializeNotificationModels } from "../src/modules/notifications/notification.service.js";
 import { UserBlockModel } from "../src/modules/privacy/block.model.js";
 import { initializeBlockModels } from "../src/modules/privacy/block.service.js";
+import { PrivacySettingsModel } from "../src/modules/privacy/privacy.model.js";
+import { initializePrivacyModels } from "../src/modules/privacy/privacy.service.js";
 import { initializeE2EFEModels } from "../src/modules/e2efe/e2efe.service.js";
 import { E2EFEDeviceModel } from "../src/modules/e2efe/e2efe-device.model.js";
 import { E2EFEMessageEnvelopeModel } from "../src/modules/e2efe/e2efe-message-envelope.model.js";
@@ -29,10 +31,15 @@ import { E2EFEStagedMediaModel } from "../src/modules/media/e2efe-media-upload.m
 import { initializeMediaModels } from "../src/modules/media/media.service.js";
 import { GroupModel } from "../src/modules/groups/group.model.js";
 import { initializeGroupModels } from "../src/modules/groups/group.service.js";
-import { ChannelModel, ChannelPostModel } from "../src/modules/channels/channel.model.js";
+import {
+  ChannelModel,
+  ChannelPostModel,
+} from "../src/modules/channels/channel.model.js";
 import { initializeChannelModels } from "../src/modules/channels/channel.service.js";
 import { StatusModel } from "../src/modules/status/status.model.js";
 import { initializeStatusModels } from "../src/modules/status/status.service.js";
+import { ReportModel } from "../src/modules/reports/report.model.js";
+import { initializeReportModels } from "../src/modules/reports/report.service.js";
 
 export interface TestRegisterPayload {
   username: string;
@@ -99,11 +106,13 @@ export async function connectTestData(): Promise<void> {
   await initializeCallModels();
   await initializeNotificationModels();
   await initializeBlockModels();
+  await initializePrivacyModels();
   await initializeE2EFEModels();
   await initializeMediaModels();
   await initializeGroupModels();
   await initializeChannelModels();
   await initializeStatusModels();
+  await initializeReportModels();
 }
 
 export async function clearTestData(): Promise<void> {
@@ -118,6 +127,7 @@ export async function clearTestData(): Promise<void> {
     PushDeviceModel.deleteMany({}),
     UserModel.deleteMany({}),
     UserBlockModel.deleteMany({}),
+    PrivacySettingsModel.deleteMany({}),
     E2EFEDeviceModel.deleteMany({}),
     E2EFEMessageEnvelopeModel.deleteMany({}),
     E2EFEStagedMediaModel.deleteMany({}),
@@ -125,6 +135,7 @@ export async function clearTestData(): Promise<void> {
     ChannelModel.deleteMany({}),
     ChannelPostModel.deleteMany({}),
     StatusModel.deleteMany({}),
+    ReportModel.deleteMany({}),
   ]);
   if (redisClient.isReady) {
     await redisClient.del(callTimeoutKeys.timeoutSetKey);

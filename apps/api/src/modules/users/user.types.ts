@@ -13,6 +13,8 @@ export interface UserEntity {
   phoneNormalized: string | null;
   passwordHash: string;
   avatarUrl: string | null;
+  avatarStorageKey: string | null;
+  avatarMimeType: string | null;
   bio: string | null;
   emailVerified: boolean;
   phoneVerified: boolean;

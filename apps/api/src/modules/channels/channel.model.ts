@@ -5,10 +5,22 @@ import type { ChannelEntity, ChannelPostEntity } from "./channel.types.js";
 const channelSchema = new Schema<ChannelEntity>(
   {
     name: { type: String, required: true, trim: true, maxlength: 80 },
-    handle: { type: String, required: true, trim: true, lowercase: true, maxlength: 30 },
+    handle: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      maxlength: 30,
+    },
     description: { type: String, default: "", trim: true, maxlength: 500 },
+    avatarUrl: { type: String, default: null, maxlength: 2048 },
+    avatarStorageKey: { type: String, default: null, maxlength: 128 },
+    avatarMimeType: { type: String, default: null, maxlength: 100 },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    followerIds: { type: [{ type: Schema.Types.ObjectId, ref: "User" }], default: [] },
+    followerIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: [],
+    },
   },
   { collection: "channels", timestamps: true, versionKey: false },
 );
@@ -28,4 +40,7 @@ const channelPostSchema = new Schema<ChannelPostEntity>(
 channelPostSchema.index({ channelId: 1, createdAt: -1, _id: -1 });
 
 export const ChannelModel = model<ChannelEntity>("Channel", channelSchema);
-export const ChannelPostModel = model<ChannelPostEntity>("ChannelPost", channelPostSchema);
+export const ChannelPostModel = model<ChannelPostEntity>(
+  "ChannelPost",
+  channelPostSchema,
+);
