@@ -1,8 +1,11 @@
 import type {
+  AdminChannelListItemDto,
+  AdminGroupListItemDto,
   AdminDashboardDto,
   AdminUserListItemDto,
   AdminUserListResponse,
   AdminReportDto,
+  BadgeType,
 } from "@terqivo/contracts";
 import {
   Navigate,
@@ -13,7 +16,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AdminApiError, adminApi } from "./api";
 import {
@@ -106,6 +109,56 @@ function formatAppVersions(user: AdminUserListItemDto): string {
       return `${version}${build}`;
     })
     .join(", ");
+}
+
+const badgeOptions: Array<{ type: BadgeType; label: string }> = [
+  { type: "verified", label: "Verified" },
+  { type: "terqivo", label: "Terqivo" },
+];
+
+const CommunityBadgeContext = createContext<{
+  busyId: string | null;
+  setBadges: (id: string, badges: BadgeType[]) => void;
+}>({
+  busyId: null,
+  setBadges: () => undefined,
+});
+
+function BadgeControls({
+  badges,
+  busy = false,
+  onChange,
+}: {
+  badges?: BadgeType[] | undefined;
+  busy?: boolean | undefined;
+  onChange: (badges: BadgeType[]) => void;
+}) {
+  const selected = new Set(badges ?? []);
+  return (
+    <div className="badge-controls" aria-label="Account badges">
+      {badgeOptions.map((option) => {
+        const active = selected.has(option.type);
+        return (
+          <button
+            aria-pressed={active}
+            className={`badge-toggle badge-toggle-${option.type}${active ? " badge-toggle-active" : ""}`}
+            disabled={busy}
+            key={option.type}
+            onClick={() => {
+              const next = active
+                ? (badges ?? []).filter((badge) => badge !== option.type)
+                : [...(badges ?? []), option.type];
+              onChange(next);
+            }}
+            title={`${active ? "Remove" : "Add"} ${option.label} badge`}
+            type="button"
+          >
+            {option.type === "verified" ? "✓" : "T"} {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -247,6 +300,10 @@ function AdminShell({
 
   const pageTitle = location.pathname.endsWith("/users")
     ? "Users"
+    : location.pathname.endsWith("/groups")
+      ? "Groups"
+      : location.pathname.endsWith("/channels")
+        ? "Channels"
     : location.pathname.endsWith("/reports")
       ? "Reports"
       : "Overview";
@@ -277,6 +334,18 @@ function AdminShell({
             <NavLink className="side-link" to="/users">
               <Icon name="users" />
               Users
+            </NavLink>
+          ) : null}
+          {canViewUsers ? (
+            <NavLink className="side-link" to="/groups">
+              <Icon name="users" />
+              Groups
+            </NavLink>
+          ) : null}
+          {canViewUsers ? (
+            <NavLink className="side-link" to="/channels">
+              <Icon name="activity" />
+              Channels
             </NavLink>
           ) : null}
           {canViewReports ? (
@@ -630,6 +699,39 @@ function UsersPage({ token }: { token: string }) {
     }
   }
 
+  async function setUserTier(
+    user: AdminUserListItemDto,
+    userTier: AdminUserListItemDto["userTier"],
+  ): Promise<void> {
+    if (userTier === user.userTier) return;
+    setActionBusyUserId(user.id);
+    setError(null);
+    try {
+      await adminApi.setUserTier(token, user.id, userTier);
+      await loadUsers();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setActionBusyUserId(null);
+    }
+  }
+
+  async function setUserBadges(
+    user: AdminUserListItemDto,
+    badges: BadgeType[],
+  ): Promise<void> {
+    setActionBusyUserId(user.id);
+    setError(null);
+    try {
+      await adminApi.setUserBadges(token, user.id, badges);
+      await loadUsers();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setActionBusyUserId(null);
+    }
+  }
+
   function submitSearch(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setSearch(searchInput.trim());
@@ -694,6 +796,8 @@ function UsersPage({ token }: { token: string }) {
                 <th>User</th>
                 <th>Contact</th>
                 <th>Status</th>
+                <th>Account type</th>
+                <th>User tier</th>
                 <th>App version</th>
                 <th>Last seen</th>
                 <th>Joined</th>
@@ -703,13 +807,13 @@ function UsersPage({ token }: { token: string }) {
             <tbody>
               {loading && users.length === 0 ? (
                 <tr>
-                  <td className="table-state" colSpan={7}>
+                  <td className="table-state" colSpan={9}>
                     Loading users…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td className="table-state" colSpan={7}>
+                  <td className="table-state" colSpan={9}>
                     No users match this view.
                   </td>
                 </tr>
@@ -728,6 +832,8 @@ function UsersPage({ token }: { token: string }) {
                           : "suspended",
                       )
                     }
+                    onTier={(tier) => void setUserTier(user, tier)}
+                    onBadges={(badges) => void setUserBadges(user, badges)}
                     user={user}
                   />
                 ))
@@ -769,12 +875,16 @@ function UserRow({
   busy,
   onPassword,
   onStatus,
+  onTier,
+  onBadges,
   onDelete,
 }: {
   user: AdminUserListItemDto;
   busy: boolean;
   onPassword: () => void;
   onStatus: () => void;
+  onTier: (tier: AdminUserListItemDto["userTier"]) => void;
+  onBadges: (badges: BadgeType[]) => void;
   onDelete: () => void;
 }) {
   return (
@@ -785,6 +895,7 @@ function UserRow({
           <span>
             <strong>{user.displayName}</strong>
             <small>@{user.username}</small>
+            <BadgeControls badges={user.badges} busy={busy} onChange={onBadges} />
           </span>
         </div>
       </td>
@@ -797,6 +908,23 @@ function UserRow({
         <span className={`account-status account-${user.accountStatus}`}>
           {user.accountStatus}
         </span>
+      </td>
+      <td>{user.accountType}</td>
+      <td>
+        <select
+          aria-label={`Set tier for ${user.username}`}
+          className="table-action"
+          disabled={busy}
+          onChange={(event) =>
+            onTier(event.target.value as AdminUserListItemDto["userTier"])
+          }
+          value={user.userTier}
+        >
+          <option value="normal">Normal</option>
+          <option value="special">Special</option>
+          <option value="special_pro">Special pro</option>
+          <option value="ultra_special">Ultra special</option>
+        </select>
       </td>
       <td>
         <span className="version-cell" title={formatAppVersions(user)}>
@@ -939,6 +1067,144 @@ function PasswordChangeDialog({
       </section>
     </div>
   );
+}
+
+function CommunitiesPage({
+  kind,
+  token,
+}: {
+  kind: "groups" | "channels";
+  token: string;
+}) {
+  const [groups, setGroups] = useState<AdminGroupListItemDto[]>([]);
+  const [channels, setChannels] = useState<AdminChannelListItemDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+
+  async function load(): Promise<void> {
+    setLoading(true);
+    try {
+      if (kind === "groups") {
+        const result = await adminApi.groups(token);
+        setGroups(result.groups);
+      } else {
+        const result = await adminApi.channels(token);
+        setChannels(result.channels);
+      }
+      setError(null);
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, [kind, token]);
+
+  async function setCommunityBadges(id: string, badges: BadgeType[]): Promise<void> {
+    setActionBusyId(id);
+    setError(null);
+    try {
+      if (kind === "groups") await adminApi.setGroupBadges(token, id, badges);
+      else await adminApi.setChannelBadges(token, id, badges);
+      await load();
+    } catch (requestError: unknown) {
+      setError(errorMessage(requestError));
+    } finally {
+      setActionBusyId(null);
+    }
+  }
+
+  const title = kind === "groups" ? "Groups across the platform." : "Channels across the platform.";
+  const description = kind === "groups"
+    ? "Review ownership, admins and every current member."
+    : "Review channel ownership, follower membership and the latest post.";
+
+  return (
+    <CommunityBadgeContext.Provider
+      value={{ busyId: actionBusyId, setBadges: (id, badges) => void setCommunityBadges(id, badges) }}
+    >
+    <div className="page-stack">
+      <section className="welcome-row compact-welcome">
+        <div>
+          <span className="section-kicker">COMMUNITIES</span>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <span className="count-chip">
+          {formatNumber(kind === "groups" ? groups.length : channels.length)} shown
+        </span>
+      </section>
+      <section className="panel directory-panel">
+        <div className="directory-toolbar">
+          <span className="contact-cell">
+            {kind === "groups" ? "Owner · admins/members · joined count" : "Owner · followers · latest post"}
+          </span>
+          <button className="secondary-button" disabled={loading} onClick={() => void load()} type="button">
+            Refresh
+          </button>
+        </div>
+        {error !== null ? <div className="inline-error">{error}</div> : null}
+        <div className="table-wrap">
+          {kind === "groups" ? (
+            <table>
+              <thead><tr><th>Group</th><th>Owner</th><th>Members</th><th>Joined users</th><th>Updated</th></tr></thead>
+              <tbody>
+                {loading && groups.length === 0 ? <tr><td className="table-state" colSpan={5}>Loading groups…</td></tr> : groups.length === 0 ? <tr><td className="table-state" colSpan={5}>No groups yet.</td></tr> : groups.map((group) => <AdminGroupRow group={group} key={group.id} />)}
+              </tbody>
+            </table>
+          ) : (
+            <table>
+              <thead><tr><th>Channel</th><th>Owner</th><th>Followers</th><th>Joined users</th><th>Latest post</th><th>Updated</th></tr></thead>
+              <tbody>
+                {loading && channels.length === 0 ? <tr><td className="table-state" colSpan={6}>Loading channels…</td></tr> : channels.length === 0 ? <tr><td className="table-state" colSpan={6}>No channels yet.</td></tr> : channels.map((channel) => <AdminChannelRow channel={channel} key={channel.id} />)}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </div>
+    </CommunityBadgeContext.Provider>
+  );
+}
+
+function AdminGroupRow({ group }: { group: AdminGroupListItemDto }) {
+  const { busyId, setBadges } = useContext(CommunityBadgeContext);
+  return (
+    <tr>
+      <td><strong>{group.name}</strong><small>{group.description || "No description"}</small><BadgeControls badges={group.badges} busy={busyId === group.id} onChange={(badges) => setBadges(group.id, badges)} /></td>
+      <td>
+        <strong>{group.owner === null ? "Unknown" : `@${group.owner.username}`}</strong>
+        <small>Admins: {formatPeople(group.admins)}</small>
+      </td>
+      <td><span className="account-status account-active">{group.memberCount}</span></td>
+      <td><span className="contact-cell">{formatPeople(group.members)}</span></td>
+      <td>{formatDate(group.updatedAt)}</td>
+    </tr>
+  );
+}
+
+function AdminChannelRow({ channel }: { channel: AdminChannelListItemDto }) {
+  const { busyId, setBadges } = useContext(CommunityBadgeContext);
+  return (
+    <tr>
+      <td><strong>{channel.name}</strong><small>@{channel.handle}</small><BadgeControls badges={channel.badges} busy={busyId === channel.id} onChange={(badges) => setBadges(channel.id, badges)} /></td>
+      <td>{channel.owner === null ? "Unknown" : `@${channel.owner.username}`}</td>
+      <td><span className="account-status account-active">{channel.followerCount}</span></td>
+      <td><span className="contact-cell">{formatPeople(channel.followers)}</span></td>
+      <td><span className="contact-cell">{channel.latestPost?.text ?? "No posts yet"}</span></td>
+      <td>{formatDate(channel.updatedAt)}</td>
+    </tr>
+  );
+}
+
+function formatPeople(people: Array<{ username: string }>): string {
+  if (people.length === 0) return "None";
+  const visible = people.slice(0, 4).map((person) => `@${person.username}`);
+  return people.length > visible.length ? `${visible.join(", ")} +${people.length - visible.length}` : visible.join(", ");
 }
 
 function ReportsPage({ token }: { token: string }) {
@@ -1256,6 +1522,14 @@ export default function App() {
         <Route
           element={<UsersPage token={session?.accessToken ?? ""} />}
           path="/users"
+        />
+        <Route
+          element={<CommunitiesPage kind="groups" token={session?.accessToken ?? ""} />}
+          path="/groups"
+        />
+        <Route
+          element={<CommunitiesPage kind="channels" token={session?.accessToken ?? ""} />}
+          path="/channels"
         />
         <Route
           element={<ReportsPage token={session?.accessToken ?? ""} />}

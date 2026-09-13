@@ -1,10 +1,13 @@
 import type {
   AdminAuthenticationResponse,
+  AdminChannelListResponse,
   AdminDashboardDto,
+  AdminGroupListResponse,
   AdminPermission,
   AdminUserListItemDto,
   AdminUserListResponse,
 } from "@terqivo/contracts";
+import type { BadgeType } from "@terqivo/contracts";
 import { Types } from "mongoose";
 
 import { env } from "../../config/env.js";
@@ -19,10 +22,14 @@ import {
 import { AuthSessionModel } from "../auth/auth-session.model.js";
 import { revokeAllSessionsForUser } from "../auth/auth.service.js";
 import { CallModel } from "../calls/call.model.js";
+import { ChannelModel, ChannelPostModel } from "../channels/channel.model.js";
+import { toChannelPostDto } from "../channels/channel.dto.js";
 import { ConversationModel } from "../conversations/conversation.model.js";
+import { GroupModel } from "../groups/group.model.js";
 import { MessageModel } from "../messages/message.model.js";
 import { PushDeviceModel } from "../notifications/push-device.model.js";
 import { UserModel } from "../users/user.model.js";
+import { toContactUserDto } from "../contacts/contact.dto.js";
 import { AdminUserModel } from "./admin-user.model.js";
 import { toAdminUserDto, toAdminUserListItemDto } from "./admin.dto.js";
 import { createAdminAccessToken } from "./admin.tokens.js";
@@ -232,6 +239,9 @@ export async function listAdminUsers(
       phone: 1,
       accountStatus: 1,
       role: 1,
+      accountType: 1,
+      userTier: 1,
+      badges: 1,
       createdAt: 1,
       lastSeenAt: 1,
     })
@@ -303,6 +313,77 @@ export async function listAdminUsers(
   };
 }
 
+export async function listAdminGroups(): Promise<AdminGroupListResponse> {
+  const groups = await GroupModel.find().sort({ updatedAt: -1, _id: -1 }).limit(500).exec();
+  const ids = [...new Set(groups.flatMap((group) => [group.ownerId, ...group.memberIds].map((id) => id.toString())))];
+  const users = await UserModel.find({ _id: { $in: ids } }).exec();
+  const usersById = new Map(users.map((user) => [user._id.toString(), user]));
+  return {
+    groups: groups.map((group) => ({
+      id: group._id.toString(),
+      name: group.name,
+      description: group.description,
+      avatarUrl: group.avatarUrl,
+      badges: group.badges ?? [],
+      owner: usersById.has(group.ownerId.toString())
+        ? toContactUserDto(usersById.get(group.ownerId.toString())!)
+        : null,
+      admins: usersById.has(group.ownerId.toString())
+        ? [toContactUserDto(usersById.get(group.ownerId.toString())!)]
+        : [],
+      members: group.memberIds.flatMap((memberId) => {
+        const member = usersById.get(memberId.toString());
+        return member === undefined ? [] : [toContactUserDto(member)];
+      }),
+      memberCount: group.memberIds.length,
+      createdAt: group.createdAt.toISOString(),
+      updatedAt: group.updatedAt.toISOString(),
+    })),
+  };
+}
+
+export async function listAdminChannels(): Promise<AdminChannelListResponse> {
+  const channels = await ChannelModel.find().sort({ updatedAt: -1, _id: -1 }).limit(500).exec();
+  const posts = await ChannelPostModel.find({
+    channelId: { $in: channels.map((channel) => channel._id) },
+  }).sort({ createdAt: -1, _id: -1 }).limit(1000).exec();
+  const ids = [
+    ...new Set(
+      channels.flatMap((channel) => [channel.ownerId, ...channel.followerIds]).concat(posts.map((post) => post.authorId)).map((id) => id.toString()),
+    ),
+  ];
+  const users = await UserModel.find({ _id: { $in: ids } }).exec();
+  const usersById = new Map(users.map((user) => [user._id.toString(), user]));
+  const latestPosts = new Map<string, typeof posts[number]>();
+  for (const post of posts) {
+    if (!latestPosts.has(post.channelId.toString())) latestPosts.set(post.channelId.toString(), post);
+  }
+  return {
+    channels: channels.map((channel) => {
+      const owner = usersById.get(channel.ownerId.toString());
+      const latest = latestPosts.get(channel._id.toString());
+      const author = latest === undefined ? undefined : usersById.get(latest.authorId.toString());
+      return {
+        id: channel._id.toString(),
+        name: channel.name,
+        handle: channel.handle,
+        description: channel.description,
+        avatarUrl: channel.avatarUrl,
+        badges: channel.badges ?? [],
+        owner: owner === undefined ? null : toContactUserDto(owner),
+        followers: channel.followerIds.flatMap((followerId) => {
+          const follower = usersById.get(followerId.toString());
+          return follower === undefined ? [] : [toContactUserDto(follower)];
+        }),
+        followerCount: channel.followerIds.length,
+        latestPost: latest === undefined || author === undefined ? null : toChannelPostDto(latest, author),
+        createdAt: channel.createdAt.toISOString(),
+        updatedAt: channel.updatedAt.toISOString(),
+      };
+    }),
+  };
+}
+
 function userNotFound(): AppError {
   return new AppError({
     code: "ADMIN_USER_NOT_FOUND",
@@ -344,6 +425,66 @@ export async function setAdminUserStatus(
       ? 0
       : await revokeAllSessionsForUser(userId, "account_status_change");
   return { updated: true, status, revokedSessions };
+}
+
+export async function setAdminUserTier(
+  userId: string,
+  userTier: "normal" | "special" | "special_pro" | "ultra_special",
+): Promise<{ updated: true; userTier: typeof userTier }> {
+  const user = await getManagedUser(userId);
+  user.userTier = userTier;
+  await user.save();
+  return { updated: true, userTier };
+}
+
+export async function setAdminUserBadges(
+  userId: string,
+  badges: BadgeType[],
+): Promise<{ updated: true; badges: BadgeType[] }> {
+  const user = await getManagedUser(userId);
+  user.badges = badges;
+  await user.save();
+  return { updated: true, badges: user.badges };
+}
+
+function adminGroupNotFound(): AppError {
+  return new AppError({
+    code: "ADMIN_GROUP_NOT_FOUND",
+    message: "The group was not found.",
+    statusCode: 404,
+  });
+}
+
+function adminChannelNotFound(): AppError {
+  return new AppError({
+    code: "ADMIN_CHANNEL_NOT_FOUND",
+    message: "The channel was not found.",
+    statusCode: 404,
+  });
+}
+
+export async function setAdminGroupBadges(
+  groupId: string,
+  badges: BadgeType[],
+): Promise<{ updated: true; badges: BadgeType[] }> {
+  if (!Types.ObjectId.isValid(groupId)) throw adminGroupNotFound();
+  const group = await GroupModel.findById(groupId).exec();
+  if (group === null) throw adminGroupNotFound();
+  group.badges = badges;
+  await group.save();
+  return { updated: true, badges: group.badges };
+}
+
+export async function setAdminChannelBadges(
+  channelId: string,
+  badges: BadgeType[],
+): Promise<{ updated: true; badges: BadgeType[] }> {
+  if (!Types.ObjectId.isValid(channelId)) throw adminChannelNotFound();
+  const channel = await ChannelModel.findById(channelId).exec();
+  if (channel === null) throw adminChannelNotFound();
+  channel.badges = badges;
+  await channel.save();
+  return { updated: true, badges: channel.badges };
 }
 
 export async function deleteAdminUser(

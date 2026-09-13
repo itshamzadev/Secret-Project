@@ -15,6 +15,12 @@ import {
   adminMeController,
   adminUserStatusController,
   adminUsersController,
+  adminGroupsController,
+  adminChannelsController,
+  adminUserTierController,
+  adminUserBadgesController,
+  adminGroupBadgesController,
+  adminChannelBadgesController,
 } from "./admin.controller.js";
 
 const adminLoginLimiter = rateLimit({
@@ -48,6 +54,18 @@ export function createAdminRouter(): Router {
     requireAdminPermission("users.view"),
     adminUsersController,
   );
+  router.get(
+    "/groups",
+    authenticateAdmin,
+    requireAdminPermission("users.view"),
+    adminGroupsController,
+  );
+  router.get(
+    "/channels",
+    authenticateAdmin,
+    requireAdminPermission("users.view"),
+    adminChannelsController,
+  );
   router.patch(
     "/users/:userId/password",
     authenticateAdmin,
@@ -59,6 +77,30 @@ export function createAdminRouter(): Router {
     authenticateAdmin,
     requireAdminPermission("users.suspend"),
     adminUserStatusController,
+  );
+  router.patch(
+    "/users/:userId/tier",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminUserTierController,
+  );
+  router.patch(
+    "/users/:userId/badges",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminUserBadgesController,
+  );
+  router.patch(
+    "/groups/:groupId/badges",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminGroupBadgesController,
+  );
+  router.patch(
+    "/channels/:channelId/badges",
+    authenticateAdmin,
+    requireAdminPermission("users.manage"),
+    adminChannelBadgesController,
   );
   router.delete(
     "/users/:userId",

@@ -9,6 +9,7 @@ export function toCallUserDto(user: UserDocument): CallUserDto {
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
+    badges: user.badges ?? [],
   };
 }
 

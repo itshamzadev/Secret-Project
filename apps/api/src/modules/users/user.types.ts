@@ -1,7 +1,10 @@
+import type { BadgeType } from "@terqivo/contracts";
 import type { HydratedDocument } from "mongoose";
 
 export type AccountStatus = "active" | "suspended" | "disabled";
 export type UserRole = "user" | "moderator" | "admin";
+export type AccountType = "personal" | "professional" | "business";
+export type UserTier = "normal" | "special" | "special_pro" | "ultra_special";
 
 export interface UserEntity {
   username: string;
@@ -20,6 +23,9 @@ export interface UserEntity {
   phoneVerified: boolean;
   accountStatus: AccountStatus;
   role: UserRole;
+  accountType: AccountType;
+  userTier: UserTier;
+  badges: BadgeType[];
   lastSeenAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

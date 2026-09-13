@@ -37,9 +37,20 @@ export interface SafeUserDto {
   bio: string | null;
   role: "user" | "moderator" | "admin";
   accountStatus: "active" | "suspended" | "disabled";
+  accountType: AccountType;
+  badges?: BadgeType[];
   createdAt: string;
   updatedAt: string;
 }
+
+export const accountTypes = ["personal", "professional", "business"] as const;
+export type AccountType = (typeof accountTypes)[number];
+
+export const userTiers = ["normal", "special", "special_pro", "ultra_special"] as const;
+export type UserTier = (typeof userTiers)[number];
+
+export const badgeTypes = ["verified", "terqivo"] as const;
+export type BadgeType = (typeof badgeTypes)[number];
 
 export interface AuthSessionDto {
   id: string;
@@ -70,6 +81,8 @@ export interface ContactUserDto {
   phone: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  accountType: AccountType;
+  badges?: BadgeType[];
 }
 
 export interface ContactDto {
@@ -87,6 +100,7 @@ export interface GroupDto {
   avatarUrl: string | null;
   owner: ContactUserDto;
   members: ContactUserDto[];
+  badges?: BadgeType[];
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -111,6 +125,7 @@ export interface ChannelDto {
   followerCount: number;
   isFollowing: boolean;
   latestPost: ChannelPostDto | null;
+  badges?: BadgeType[];
   createdAt: string;
   updatedAt: string;
 }
@@ -588,6 +603,7 @@ export interface CallUserDto {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  badges?: BadgeType[];
 }
 
 export interface CallSignalDto {
@@ -773,6 +789,9 @@ export interface AdminUserListItemDto {
   phone: string | null;
   accountStatus: SafeUserDto["accountStatus"];
   role: SafeUserDto["role"];
+  accountType: AccountType;
+  userTier: UserTier;
+  badges?: BadgeType[];
   createdAt: string;
   lastSeenAt: string | null;
   appVersions: AdminUserAppVersionDto[];
@@ -790,4 +809,41 @@ export interface AdminUserAppVersionDto {
 export interface AdminUserListResponse {
   users: AdminUserListItemDto[];
   nextCursor: string | null;
+}
+
+export interface AdminGroupListItemDto {
+  id: string;
+  name: string;
+  description: string;
+  avatarUrl: string | null;
+  owner: ContactUserDto | null;
+  admins: ContactUserDto[];
+  members: ContactUserDto[];
+  badges?: BadgeType[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminChannelListItemDto {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  avatarUrl: string | null;
+  owner: ContactUserDto | null;
+  followers: ContactUserDto[];
+  followerCount: number;
+  latestPost: ChannelPostDto | null;
+  badges?: BadgeType[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminGroupListResponse {
+  groups: AdminGroupListItemDto[];
+}
+
+export interface AdminChannelListResponse {
+  channels: AdminChannelListItemDto[];
 }

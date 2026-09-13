@@ -15,6 +15,8 @@ export function toSafeUserDto(user: UserDocument): SafeUserDto {
     bio: user.bio,
     role: user.role,
     accountStatus: user.accountStatus,
+    accountType: user.accountType ?? "personal",
+    badges: user.badges ?? [],
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
   };

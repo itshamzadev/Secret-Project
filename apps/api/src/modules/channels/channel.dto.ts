@@ -36,6 +36,7 @@ export function toChannelDto(
       (id) => id.toString() === currentUserId,
     ),
     latestPost,
+    badges: channel.badges ?? [],
     createdAt: channel.createdAt.toISOString(),
     updatedAt: channel.updatedAt.toISOString(),
   };

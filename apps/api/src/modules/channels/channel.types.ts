@@ -1,3 +1,4 @@
+import type { BadgeType } from "@terqivo/contracts";
 import type { HydratedDocument, Types } from "mongoose";
 
 export interface ChannelEntity {
@@ -7,6 +8,7 @@ export interface ChannelEntity {
   avatarUrl: string | null;
   avatarStorageKey: string | null;
   avatarMimeType: string | null;
+  badges: BadgeType[];
   ownerId: Types.ObjectId;
   followerIds: Types.ObjectId[];
   createdAt: Date;

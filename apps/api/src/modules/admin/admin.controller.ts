@@ -5,10 +5,16 @@ import {
   getAdminById,
   getAdminDashboard,
   listAdminUsers,
+  listAdminGroups,
+  listAdminChannels,
   loginAdmin,
   changeAdminUserPassword,
   deleteAdminUser,
   setAdminUserStatus,
+  setAdminUserTier,
+  setAdminUserBadges,
+  setAdminGroupBadges,
+  setAdminChannelBadges,
 } from "./admin.service.js";
 import { toAdminUserDto } from "./admin.dto.js";
 import {
@@ -16,6 +22,10 @@ import {
   adminPasswordChangeSchema,
   adminUserIdParamsSchema,
   adminUserStatusSchema,
+  adminUserTierSchema,
+  adminBadgesSchema,
+  adminGroupIdParamsSchema,
+  adminChannelIdParamsSchema,
   adminUsersQuerySchema,
 } from "./admin.validation.js";
 
@@ -70,6 +80,26 @@ async function handleUsers(
   });
 }
 
+async function handleGroups(
+  _request: Request,
+  response: Response,
+): Promise<void> {
+  response.status(200).json({
+    success: true,
+    data: await listAdminGroups(),
+  });
+}
+
+async function handleChannels(
+  _request: Request,
+  response: Response,
+): Promise<void> {
+  response.status(200).json({
+    success: true,
+    data: await listAdminChannels(),
+  });
+}
+
 async function handleChangeUserPassword(
   request: Request,
   response: Response,
@@ -105,12 +135,62 @@ async function handleDeleteUser(
   });
 }
 
+async function handleUserTier(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const { userId } = adminUserIdParamsSchema.parse(request.params);
+  const { userTier } = adminUserTierSchema.parse(request.body);
+  response.status(200).json({
+    success: true,
+    data: await setAdminUserTier(userId, userTier),
+  });
+}
+
+async function handleUserBadges(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const { userId } = adminUserIdParamsSchema.parse(request.params);
+  const { badges } = adminBadgesSchema.parse(request.body);
+  response.status(200).json({
+    success: true,
+    data: await setAdminUserBadges(userId, badges),
+  });
+}
+
+async function handleGroupBadges(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const { groupId } = adminGroupIdParamsSchema.parse(request.params);
+  const { badges } = adminBadgesSchema.parse(request.body);
+  response.status(200).json({
+    success: true,
+    data: await setAdminGroupBadges(groupId, badges),
+  });
+}
+
+async function handleChannelBadges(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const { channelId } = adminChannelIdParamsSchema.parse(request.params);
+  const { badges } = adminBadgesSchema.parse(request.body);
+  response.status(200).json({
+    success: true,
+    data: await setAdminChannelBadges(channelId, badges),
+  });
+}
+
 export const adminLoginController: RequestHandler = controller(handleLogin);
 export const adminMeController: RequestHandler = controller(handleMe);
 export const adminLogoutController: RequestHandler = controller(handleLogout);
 export const adminDashboardController: RequestHandler =
   controller(handleDashboard);
 export const adminUsersController: RequestHandler = controller(handleUsers);
+export const adminGroupsController: RequestHandler = controller(handleGroups);
+export const adminChannelsController: RequestHandler = controller(handleChannels);
 export const adminChangeUserPasswordController: RequestHandler = controller(
   handleChangeUserPassword,
 );
@@ -118,3 +198,7 @@ export const adminUserStatusController: RequestHandler =
   controller(handleUserStatus);
 export const adminDeleteUserController: RequestHandler =
   controller(handleDeleteUser);
+export const adminUserTierController: RequestHandler = controller(handleUserTier);
+export const adminUserBadgesController: RequestHandler = controller(handleUserBadges);
+export const adminGroupBadgesController: RequestHandler = controller(handleGroupBadges);
+export const adminChannelBadgesController: RequestHandler = controller(handleChannelBadges);

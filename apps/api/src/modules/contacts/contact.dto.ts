@@ -11,6 +11,8 @@ export function toContactUserDto(user: UserDocument): ContactUserDto {
     phone: user.phone,
     avatarUrl: user.avatarUrl,
     bio: user.bio,
+    accountType: user.accountType ?? "personal",
+    badges: user.badges ?? [],
   };
 }
 

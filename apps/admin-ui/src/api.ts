@@ -1,6 +1,9 @@
 import type {
+  BadgeType,
   AdminAuthenticationResponse,
+  AdminChannelListResponse,
   AdminDashboardDto,
+  AdminGroupListResponse,
   AdminUserDto,
   AdminUserListResponse,
   AdminReportListResponse,
@@ -106,6 +109,14 @@ export const adminApi = {
     );
   },
 
+  groups(token: string) {
+    return request<AdminGroupListResponse>("/admin/groups", { token });
+  },
+
+  channels(token: string) {
+    return request<AdminChannelListResponse>("/admin/channels", { token });
+  },
+
   changeUserPassword(token: string, userId: string, password: string) {
     return request<{ updated: true; revokedSessions: number }>(
       `/admin/users/${userId}/password`,
@@ -133,6 +144,38 @@ export const adminApi = {
     return request<{ deleted: true; revokedSessions: number }>(
       `/admin/users/${userId}`,
       { method: "DELETE", token },
+    );
+  },
+
+  setUserTier(
+    token: string,
+    userId: string,
+    userTier: "normal" | "special" | "special_pro" | "ultra_special",
+  ) {
+    return request<{ updated: true; userTier: typeof userTier }>(
+      `/admin/users/${userId}/tier`,
+      { method: "PATCH", token, body: { userTier } },
+    );
+  },
+
+  setUserBadges(token: string, userId: string, badges: BadgeType[]) {
+    return request<{ updated: true; badges: BadgeType[] }>(
+      `/admin/users/${userId}/badges`,
+      { method: "PATCH", token, body: { badges } },
+    );
+  },
+
+  setGroupBadges(token: string, groupId: string, badges: BadgeType[]) {
+    return request<{ updated: true; badges: BadgeType[] }>(
+      `/admin/groups/${groupId}/badges`,
+      { method: "PATCH", token, body: { badges } },
+    );
+  },
+
+  setChannelBadges(token: string, channelId: string, badges: BadgeType[]) {
+    return request<{ updated: true; badges: BadgeType[] }>(
+      `/admin/channels/${channelId}/badges`,
+      { method: "PATCH", token, body: { badges } },
     );
   },
 

@@ -15,6 +15,9 @@ type AdminUserListSource = {
   phone: string | null;
   accountStatus: "active" | "suspended" | "disabled";
   role: "user" | "moderator" | "admin";
+  accountType: "personal" | "professional" | "business";
+  userTier: "normal" | "special" | "special_pro" | "ultra_special";
+  badges?: ("verified" | "terqivo")[];
   createdAt: Date;
   lastSeenAt: Date | null;
 };
@@ -43,6 +46,9 @@ export function toAdminUserListItemDto(
     phone: user.phone,
     accountStatus: user.accountStatus,
     role: user.role,
+    accountType: user.accountType ?? "personal",
+    userTier: user.userTier ?? "normal",
+    badges: user.badges ?? [],
     createdAt: user.createdAt.toISOString(),
     lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
     appVersions,

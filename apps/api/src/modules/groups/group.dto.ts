@@ -21,6 +21,7 @@ export function toGroupDto(
     avatarUrl: group.avatarUrl,
     owner: toContactUserDto(owner),
     members,
+    badges: group.badges ?? [],
     memberCount: group.memberIds.length,
     createdAt: group.createdAt.toISOString(),
     updatedAt: group.updatedAt.toISOString(),

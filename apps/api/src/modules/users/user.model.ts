@@ -83,6 +83,21 @@ const userSchema = new Schema<UserEntity>(
       enum: ["user", "moderator", "admin"],
       default: "user",
     },
+    accountType: {
+      type: String,
+      enum: ["personal", "professional", "business"],
+      default: "personal",
+    },
+    userTier: {
+      type: String,
+      enum: ["normal", "special", "special_pro", "ultra_special"],
+      default: "normal",
+    },
+    badges: {
+      type: [String],
+      enum: ["verified", "terqivo"],
+      default: [],
+    },
     lastSeenAt: {
       type: Date,
       default: null,

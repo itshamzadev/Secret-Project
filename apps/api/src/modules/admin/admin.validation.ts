@@ -1,4 +1,4 @@
-import { adminRoles } from "@terqivo/contracts";
+import { adminRoles, badgeTypes } from "@terqivo/contracts";
 import { z } from "zod";
 
 export const adminLoginSchema = z.object({
@@ -30,6 +30,22 @@ export const adminPasswordChangeSchema = z.object({
 export const adminUserStatusSchema = z.object({
   status: z.enum(["active", "suspended", "disabled"]),
 });
+
+export const adminUserTierSchema = z.object({
+  userTier: z.enum(["normal", "special", "special_pro", "ultra_special"]),
+});
+
+export const adminBadgesSchema = z.object({
+  badges: z
+    .array(z.enum(badgeTypes))
+    .max(badgeTypes.length)
+    .refine((badges) => new Set(badges).size === badges.length, "Duplicate badges are not allowed."),
+});
+
+const adminTargetIdSchema = z.string().trim().regex(/^[a-f\d]{24}$/i, "id must be a valid ObjectId");
+
+export const adminGroupIdParamsSchema = z.object({ groupId: adminTargetIdSchema });
+export const adminChannelIdParamsSchema = z.object({ channelId: adminTargetIdSchema });
 
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
 export type AdminUsersQuery = z.infer<typeof adminUsersQuerySchema>;

@@ -952,6 +952,47 @@ tbody tr:last-child td {
   gap: 10px;
 }
 
+.badge-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.badge-toggle {
+  border: 1px solid #dce6f2;
+  border-radius: 999px;
+  padding: 4px 6px;
+  color: #6f8198;
+  background: #f8fafc;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.badge-toggle:hover:not(:disabled) {
+  border-color: #e2a650;
+  color: #8d5b1f;
+  background: #fff8ec;
+}
+
+.badge-toggle-active {
+  border-color: #e2a650;
+  color: #8d5b1f;
+  background: #fff3dc;
+}
+
+.badge-toggle-terqivo.badge-toggle-active {
+  border-color: #31557c;
+  color: #21466f;
+  background: #edf4ff;
+}
+
+.badge-toggle:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .user-avatar {
   width: 34px;
   height: 34px;

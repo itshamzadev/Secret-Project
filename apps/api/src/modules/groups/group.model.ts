@@ -10,6 +10,11 @@ const groupSchema = new Schema<GroupEntity>(
     avatarUrl: { type: String, default: null, maxlength: 2048 },
     avatarStorageKey: { type: String, default: null, maxlength: 128 },
     avatarMimeType: { type: String, default: null, maxlength: 100 },
+    badges: {
+      type: [String],
+      enum: ["verified", "terqivo"],
+      default: [],
+    },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     memberIds: {
       type: [{ type: Schema.Types.ObjectId, ref: "User" }],

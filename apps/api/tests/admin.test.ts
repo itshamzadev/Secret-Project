@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { hasAdminPermission } from "../src/modules/admin/admin.service.js";
 import {
+  adminBadgesSchema,
   adminLoginSchema,
   adminUsersQuerySchema,
 } from "../src/modules/admin/admin.validation.js";
@@ -47,5 +48,13 @@ describe("admin foundation", () => {
       }),
     ).toEqual({ email: "admin@example.com", password: "long-password" });
     expect(adminUsersQuerySchema.parse({ limit: "10" })).toEqual({ limit: 10 });
+  });
+
+  it("accepts either badge and rejects duplicate or unknown badges", () => {
+    expect(adminBadgesSchema.parse({ badges: ["verified", "terqivo"] })).toEqual({
+      badges: ["verified", "terqivo"],
+    });
+    expect(() => adminBadgesSchema.parse({ badges: ["verified", "verified"] })).toThrow();
+    expect(() => adminBadgesSchema.parse({ badges: ["official"] })).toThrow();
   });
 });

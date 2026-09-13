@@ -468,3 +468,60 @@ describe("session management", () => {
     );
   });
 });
+
+describe("profile updates", () => {
+  it("updates the username, display name and about line", async () => {
+    const registration = authData(await register());
+    const response = await request(app)
+      .patch("/api/v1/users/me/profile")
+      .set(authHeader(registration.accessToken))
+      .send({
+        username: "Alice.Updated",
+        displayName: "Alice Updated",
+        bio: "Building better conversations.",
+        email: "alice.updated@example.com",
+        phone: "+14155550199",
+        accountType: "professional",
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      data: {
+        user: {
+          id: registration.user.id,
+          username: "Alice.Updated",
+          displayName: "Alice Updated",
+          bio: "Building better conversations.",
+          email: "alice.updated@example.com",
+          phone: "+14155550199",
+          accountType: "professional",
+        },
+      },
+    });
+    expect(
+      await UserModel.exists({
+        _id: registration.user.id,
+        usernameNormalized: "alice.updated",
+      }),
+    ).not.toBeNull();
+  });
+
+  it("rejects a username already used by another account", async () => {
+    const first = authData(await register());
+    await register({
+      username: "Bob.Example",
+      name: "Bob Example",
+      email: "bob@example.com",
+      phone: "+14155550102",
+    });
+
+    const response = await request(app)
+      .patch("/api/v1/users/me/profile")
+      .set(authHeader(first.accessToken))
+      .send({ username: "bob.example" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("USERNAME_TAKEN");
+  });
+});

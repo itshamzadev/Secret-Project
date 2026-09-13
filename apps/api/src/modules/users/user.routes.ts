@@ -5,6 +5,7 @@ import { authenticate } from "../../middleware/authenticate.js";
 import {
   mePresenceController,
   userPresenceController,
+  userProfileUpdateController,
   userAvatarDeleteController,
   userAvatarDownloadController,
   userAvatarUploadController,
@@ -27,6 +28,7 @@ export function createUserRouter(): Router {
   });
   router.get("/me/privacy", getPrivacySettingsController);
   router.patch("/me/privacy", updatePrivacySettingsController);
+  router.patch("/me/profile", userProfileUpdateController);
   router.post("/me/avatar", avatarBody, userAvatarUploadController);
   router.delete("/me/avatar", userAvatarDeleteController);
   router.get("/:userId/avatar", userAvatarDownloadController);
