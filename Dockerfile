@@ -14,6 +14,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/admin-ui/package.json ./apps/admin-ui/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/logger/package.json ./packages/logger/package.json
+COPY packages/auth-core/package.json ./packages/auth-core/package.json
 
 # Install only the API and its workspace dependency graph. The root package also
 # contains Android tooling, which is not part of the backend production image.
@@ -22,8 +24,12 @@ RUN pnpm install --filter @terqivo/api... --filter @terqivo/admin-ui... --frozen
 COPY apps/api ./apps/api
 COPY apps/admin-ui ./apps/admin-ui
 COPY packages/contracts ./packages/contracts
+COPY packages/logger ./packages/logger
+COPY packages/auth-core ./packages/auth-core
 
 RUN pnpm --filter @terqivo/contracts build
+RUN pnpm --filter @terqivo/logger build
+RUN pnpm --filter @terqivo/auth-core build
 RUN pnpm --filter @terqivo/admin-ui build
 RUN pnpm --filter @terqivo/api build
 RUN pnpm --filter @terqivo/api --prod deploy --legacy /app/deploy
@@ -43,6 +49,10 @@ COPY --from=build /app/deploy/dist ./apps/api/dist
 # while the deployed API dependencies resolve it from the isolated node_modules.
 COPY --from=build /app/packages/contracts/package.json ./packages/contracts/package.json
 COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build /app/packages/logger/package.json ./packages/logger/package.json
+COPY --from=build /app/packages/logger/dist ./packages/logger/dist
+COPY --from=build /app/packages/auth-core/package.json ./packages/auth-core/package.json
+COPY --from=build /app/packages/auth-core/dist ./packages/auth-core/dist
 COPY --from=build /app/apps/admin-ui/dist ./admin-ui
 
 EXPOSE 5000

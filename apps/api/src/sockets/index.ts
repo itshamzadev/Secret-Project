@@ -81,6 +81,14 @@ import {
   subscribeToEncryptedMessageUpdated,
 } from "../modules/messages/message.events.js";
 import { subscribeToConversationCleared } from "../modules/conversations/conversation.events.js";
+import {
+  isMessageServerBridgeEnabled,
+  markConversationReadThroughMessageServer,
+  markMessageDeliveredThroughMessageServer,
+  sendEncryptedMessageThroughMessageServer,
+  sendTextMessageThroughMessageServer,
+} from "./message-bridge.js";
+import { createMessageEventBridge } from "./message-event-bridge.js";
 
 export interface SocketRuntime {
   io: Server;
@@ -182,6 +190,7 @@ function broadcastCall(
     | "call:failed",
   call: CallSocketEvent["call"],
 ): void {
+  if (!redisClient.isReady) return;
   const payload: CallSocketEvent = { call };
   io.to(userRoom(call.callerId)).emit(event, payload);
   io.to(userRoom(call.calleeId)).emit(event, payload);
@@ -436,23 +445,34 @@ function installMessageEvents(io: Server, socket: Socket): void {
       return;
     }
 
-    void sendTextMessage(
-      contextForSocket(socket),
-      parsed.data.conversationId,
-      parsed.data,
-    )
+    const context = contextForSocket(socket);
+    const accessToken = socket.data.accessToken;
+    const useBridge =
+      isMessageServerBridgeEnabled() && accessToken !== undefined;
+    const resultPromise =
+      useBridge
+        ? sendTextMessageThroughMessageServer(
+            context,
+            accessToken,
+            parsed.data.conversationId,
+            parsed.data,
+          )
+        : sendTextMessage(context, parsed.data.conversationId, parsed.data);
+    void resultPromise
       .then((result) => {
         const data = {
           message: result.message,
           duplicate: result.duplicate,
         };
         acknowledge(ack, { success: true, data });
-        io.to(userRoom(result.recipientId)).emit("message:new", {
-          message: result.message,
-        });
-        socket
-          .to(userRoom(contextForSocket(socket).userId))
-          .emit("message:sent", data);
+        if (!useBridge) {
+          io.to(userRoom(result.recipientId)).emit("message:new", {
+            message: result.message,
+          });
+          socket
+            .to(userRoom(context.userId))
+            .emit("message:sent", data);
+        }
       })
       .catch((error: unknown) => {
         logSocketError(socket, "message:send", error);
@@ -468,7 +488,19 @@ function installMessageEvents(io: Server, socket: Socket): void {
         acknowledge(ack, SOCKET_VALIDATION_ERROR);
         return;
       }
-      void sendEncryptedMessage(contextForSocket(socket), parsed.data.conversationId, parsed.data)
+      const context = contextForSocket(socket);
+      const accessToken = socket.data.accessToken;
+      const useBridge =
+        isMessageServerBridgeEnabled() && accessToken !== undefined;
+      const resultPromise =
+        useBridge
+          ? sendEncryptedMessageThroughMessageServer(
+              context,
+              accessToken,
+              parsed.data,
+            )
+          : sendEncryptedMessage(context, parsed.data.conversationId, parsed.data);
+      void resultPromise
         .then((result) => {
           acknowledge(ack, {
             success: true,
@@ -494,8 +526,19 @@ function installMessageEvents(io: Server, socket: Socket): void {
         acknowledge(ack, SOCKET_VALIDATION_ERROR);
         return;
       }
-      void markMessageDelivered(contextForSocket(socket), parsed.data.messageId)
-        .then((receipt) => {
+      const context = contextForSocket(socket);
+      const accessToken = socket.data.accessToken;
+      const useBridge =
+        isMessageServerBridgeEnabled() && accessToken !== undefined;
+      const receiptPromise =
+        useBridge
+          ? markMessageDeliveredThroughMessageServer(
+              context,
+              accessToken,
+              parsed.data.messageId,
+            ).then((result) => result.receipt)
+          : markMessageDelivered(context, parsed.data.messageId);
+      void receiptPromise.then((receipt) => {
           acknowledge(ack, { success: true, data: { receipt } });
           io.to(userRoom(receipt.senderId)).emit("message:delivered", {
             receipt,
@@ -516,11 +559,19 @@ function installMessageEvents(io: Server, socket: Socket): void {
         acknowledge(ack, SOCKET_VALIDATION_ERROR);
         return;
       }
-      void markConversationRead(
-        contextForSocket(socket),
-        parsed.data.conversationId,
-        parsed.data,
-      )
+      const context = contextForSocket(socket);
+      const accessToken = socket.data.accessToken;
+      const useBridge =
+        isMessageServerBridgeEnabled() && accessToken !== undefined;
+      const receiptPromise =
+        useBridge
+          ? markConversationReadThroughMessageServer(
+              context,
+              accessToken,
+              parsed.data,
+            ).then((result) => result.receipt)
+          : markConversationRead(context, parsed.data.conversationId, parsed.data);
+      void receiptPromise
         .then(async (receipt) => {
           acknowledge(ack, { success: true, data: { receipt } });
           const conversation = await getOwnedConversation(
@@ -637,6 +688,7 @@ export async function createSocketServer(
   });
 
   io.adapter(createAdapter(redisClient, redisSubscriber));
+  const closeMessageEventBridge = await createMessageEventBridge(io);
   installSocketAuthentication(io);
   await recoverCallTimeouts();
   const callTimeoutCoordinator = startCallTimeoutCoordinator(async (call) => {
@@ -826,6 +878,7 @@ export async function createSocketServer(
       unsubscribeUserStateEvents();
       unsubscribeConversationCleared();
       await io.close();
+      await closeMessageEventBridge();
       if (redisSubscriber.isOpen) {
         await redisSubscriber.quit();
       }

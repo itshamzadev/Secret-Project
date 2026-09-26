@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+
+import { SignJWT } from "jose";
 import type { CallType, MessageDto } from "@terqivo/contracts";
 
 import { env } from "../../config/env.js";
@@ -86,6 +89,35 @@ const pushDeduplicationTtlSeconds = 86_400;
 const expoBatchSize = 100;
 const expoRequestTimeoutMs = 10_000;
 const expoReceiptDelayMs = 15_000;
+
+async function dispatchThroughNotificationServer(input: {
+  recipientUserId: string;
+  type: "message" | "incoming_call" | "missed_call";
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  channelId: "messages" | "calls";
+  deduplicationKey: string;
+}): Promise<boolean> {
+  if (env.NOTIFICATION_SERVICE_URL === undefined) return false;
+  if (env.INTERNAL_SERVICE_SECRET === undefined) throw new Error("NOTIFICATION_SERVICE_AUTH_NOT_CONFIGURED");
+  const token = await new SignJWT({ serviceName: "legacy-api" })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(env.INTERNAL_SERVICE_ISSUER)
+    .setAudience(env.INTERNAL_SERVICE_AUDIENCE)
+    .setSubject("legacy-api")
+    .setIssuedAt()
+    .setExpirationTime("60s")
+    .sign(new TextEncoder().encode(env.INTERNAL_SERVICE_SECRET));
+  const response = await fetch(`${env.NOTIFICATION_SERVICE_URL}/internal/notifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", "x-internal-service-token": token, "x-request-id": randomUUID(), "x-correlation-id": randomUUID() },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error(`NOTIFICATION_SERVICE_HTTP_${response.status}`);
+  return true;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -563,6 +595,14 @@ export async function dispatchNewDirectMessage(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:message:${input.message.id}`;
   try {
+    if (env.NOTIFICATION_SERVICE_URL !== undefined) {
+      const sender = await getUserById(input.senderId);
+      if (sender === null) return;
+      if (await isUserBlockedEitherDirection(input.senderId, input.recipientId)) return;
+      if (await isConversationMuted(input.message.conversationId, input.recipientId)) return;
+      await dispatchThroughNotificationServer({ recipientUserId: input.recipientId, type: "message", title: sender.displayName, body: notificationPreview(input.message), data: { type: "message", conversationId: input.message.conversationId, senderId: input.message.senderId, messageId: input.message.id }, channelId: "messages", deduplicationKey });
+      return;
+    }
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       if (
         (await isUserBlockedEitherDirection(
@@ -616,6 +656,11 @@ export async function dispatchIncomingCallNotification(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:call:${call._id.toString()}`;
   try {
+    if (env.NOTIFICATION_SERVICE_URL !== undefined) {
+      if (await isUserBlockedEitherDirection(call.callerId.toString(), call.calleeId.toString())) return;
+      await dispatchThroughNotificationServer({ recipientUserId: call.calleeId.toString(), type: "incoming_call", title: `Incoming ${call.type} call`, body: `${caller.displayName} is calling you`, data: { type: "incoming_call", callId: call._id.toString(), callerId: call.callerId.toString(), callType: call.type }, channelId: "calls", deduplicationKey });
+      return;
+    }
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       if (
         await isUserBlockedEitherDirection(
@@ -658,6 +703,13 @@ export async function dispatchMissedCallNotification(
 ): Promise<void> {
   const deduplicationKey = `terqivo:push:missed-call:${call._id.toString()}`;
   try {
+    if (env.NOTIFICATION_SERVICE_URL !== undefined) {
+      if (await isUserBlockedEitherDirection(call.callerId.toString(), call.calleeId.toString())) return;
+      const caller = await getUserById(call.callerId.toString());
+      if (caller === null) return;
+      await dispatchThroughNotificationServer({ recipientUserId: call.calleeId.toString(), type: "missed_call", title: `Missed ${call.type} call`, body: caller.displayName, data: { type: "missed_call", callId: call._id.toString(), callerId: call.callerId.toString(), callType: call.type }, channelId: "calls", deduplicationKey });
+      return;
+    }
     const dedupAccepted = await runPushOnce(deduplicationKey, async () => {
       if (
         await isUserBlockedEitherDirection(

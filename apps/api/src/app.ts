@@ -11,6 +11,14 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
+import {
+  correlationIdHeader,
+  createRequestContext,
+  requestIdHeader,
+  type RequestContext,
+  type RequestContextInput,
+} from "@terqivo/logger";
+
 import { allowedWebOrigins, env } from "./config/env.js";
 import { AppError } from "./core/errors.js";
 import { mountAdminUi } from "./core/admin-ui.js";
@@ -45,6 +53,7 @@ import {
   createAdminReportRouter,
   createReportRouter,
 } from "./modules/reports/report.routes.js";
+import { createRealtimeCallBridgeRouter } from "./modules/calls/realtime-call-bridge.routes.js";
 
 export interface CreateAppOptions {
   getHealthSnapshot?: HealthSnapshotProvider;
@@ -77,6 +86,34 @@ function isSameOriginRequest(request: Request, requestOrigin: string): boolean {
   return `${request.protocol}://${request.get("host")}` === requestOrigin;
 }
 
+type RequestWithContext = Request & {
+  terqivoRequestContext?: RequestContext;
+};
+
+function requestContextMiddleware(
+  request: Request,
+  response: Parameters<RequestHandler>[1],
+  next: Parameters<RequestHandler>[2],
+): void {
+  const contextInput: RequestContextInput = {};
+  const requestId = request.get(requestIdHeader);
+  const correlationId = request.get(correlationIdHeader);
+
+  if (requestId !== undefined) {
+    contextInput.requestId = requestId;
+  }
+  if (correlationId !== undefined) {
+    contextInput.correlationId = correlationId;
+  }
+
+  const context = createRequestContext(contextInput);
+
+  (request as RequestWithContext).terqivoRequestContext = context;
+  response.setHeader(requestIdHeader, context.requestId);
+  response.setHeader(correlationIdHeader, context.correlationId);
+  next();
+}
+
 const apiCorsMiddleware: RequestHandler = (request, response, next) => {
   const requestOrigin = request.get("origin");
 
@@ -101,6 +138,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.set("trust proxy", 1);
   const getSnapshot = options.getHealthSnapshot ?? getHealthSnapshot;
 
+  app.use(requestContextMiddleware);
   app.disable("x-powered-by");
   const publicUrlIsHttps =
     env.PUBLIC_URL !== undefined &&
@@ -141,7 +179,22 @@ export function createApp(options: CreateAppOptions = {}): Express {
       },
     }),
   );
-  app.use(pinoHttp({ logger }));
+  app.use(
+    pinoHttp({
+      logger,
+      customProps: (request) => {
+        const context = (request as RequestWithContext)
+          .terqivoRequestContext;
+
+        return context === undefined
+          ? {}
+          : {
+              requestId: context.requestId,
+              correlationId: context.correlationId,
+            };
+      },
+    }),
+  );
 
   const apiV1Router = Router();
   apiV1Router.use("/health", createHealthRouter(getSnapshot));
@@ -165,6 +218,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   apiV1Router.use("/channels", createChannelRouter());
   apiV1Router.use("/status", createStatusRouter());
   app.use("/api/v1", apiV1Router);
+  app.use("/internal/realtime", createRealtimeCallBridgeRouter());
   logger.info(
     { routePrefix: "/api/v1", loginRoute: "POST /api/v1/auth/login" },
     "API v1 routes mounted",

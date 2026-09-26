@@ -1,4 +1,10 @@
-# Authentication
+# Authentication compatibility adapter
+
+The runnable auth implementation now lives in `packages/auth-core` and
+`servers/auth-server`. This API module remains a thin compatibility import so
+the monolith can run unchanged by itself and can validate the same JWT/session
+records for legacy routes. The Gateway routes public auth traffic to Auth
+Server during Phase 4.
 
 Phase 1 authentication is implemented here using thin Express controllers, service-level business logic, Argon2id password hashing, JOSE JWT access tokens, and opaque rotating refresh tokens.
 

@@ -1,6 +1,7 @@
 import { pipeline } from "node:stream/promises";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { Types } from "mongoose";
+import { userProfileUpdateController as sharedUserProfileUpdateController } from "@terqivo/auth-core";
 
 import { AppError } from "../../core/errors.js";
 import { requireAuthContext } from "../../middleware/authenticate.js";
@@ -14,16 +15,6 @@ import { PrivacySettingsModel } from "../privacy/privacy.model.js";
 import { getOwnPresenceHistory } from "./presence.service.js";
 import { toSafeUserDto } from "./user.dto.js";
 import { UserModel } from "./user.model.js";
-import {
-  normalizeEmail,
-  normalizePhone,
-  normalizeUsername,
-} from "./user.service.js";
-import { updateUserProfileSchema } from "./user.validation.js";
-import {
-  getMongoDuplicateFields,
-  isMongoDuplicateKeyError,
-} from "../../utils/mongo.js";
 import {
   presenceHistoryQuerySchema,
   presenceUserIdParamsSchema,
@@ -71,94 +62,8 @@ export const mePresenceController: RequestHandler =
 export const userPresenceController: RequestHandler =
   controller(handleUserPresence);
 
-async function handleProfileUpdate(
-  request: Request,
-  response: Response,
-): Promise<void> {
-  const context = requireAuthContext(request);
-  const input = updateUserProfileSchema.parse(request.body);
-  const user = await UserModel.findById(context.userId).exec();
-
-  if (user === null) {
-    throw new AppError({
-      code: "USER_NOT_FOUND",
-      message: "Your account was not found.",
-      statusCode: 404,
-    });
-  }
-
-  if (input.username !== undefined) {
-    const usernameNormalized = normalizeUsername(input.username);
-    const usernameConflict = await UserModel.exists({
-      _id: { $ne: user._id },
-      usernameNormalized,
-    }).exec();
-    if (usernameConflict !== null) {
-      throw new AppError({
-        code: "USERNAME_TAKEN",
-        message: "That username is already in use.",
-        statusCode: 409,
-      });
-    }
-    user.username = input.username;
-    user.usernameNormalized = usernameNormalized;
-  }
-  if (input.displayName !== undefined) user.displayName = input.displayName;
-  if (input.bio !== undefined) user.bio = input.bio === "" ? null : input.bio;
-  const nextEmail = input.email === undefined ? user.email : input.email;
-  const nextPhone = input.phone === undefined ? user.phone : input.phone;
-  if (nextEmail === null && nextPhone === null) {
-    throw new AppError({
-      code: "CONTACT_REQUIRED",
-      message: "At least an email address or phone number is required.",
-      statusCode: 400,
-    });
-  }
-  if (input.email !== undefined) {
-    const normalizedEmail = nextEmail === null ? null : normalizeEmail(nextEmail);
-    user.email = normalizedEmail;
-    user.emailNormalized = normalizedEmail;
-  }
-  if (input.phone !== undefined) {
-    const normalizedPhone = nextPhone === null ? null : normalizePhone(nextPhone);
-    user.phone = normalizedPhone;
-    user.phoneNormalized = normalizedPhone;
-  }
-  if (input.accountType !== undefined) user.accountType = input.accountType;
-
-  try {
-    await user.save();
-  } catch (error: unknown) {
-    if (isMongoDuplicateKeyError(error)) {
-      const duplicateFields = getMongoDuplicateFields(error);
-      const code = duplicateFields.includes("emailNormalized")
-        ? "EMAIL_TAKEN"
-        : duplicateFields.includes("phoneNormalized")
-          ? "PHONE_TAKEN"
-          : "USERNAME_TAKEN";
-      const message =
-        code === "EMAIL_TAKEN"
-          ? "That email address is already in use."
-          : code === "PHONE_TAKEN"
-            ? "That phone number is already in use."
-            : "That username is already in use.";
-      throw new AppError({
-        code,
-        message,
-        statusCode: 409,
-      });
-    }
-    throw error;
-  }
-
-  response.status(200).json({
-    success: true,
-    data: { user: toSafeUserDto(user) },
-  });
-}
-
 export const userProfileUpdateController: RequestHandler =
-  controller(handleProfileUpdate);
+  sharedUserProfileUpdateController;
 
 async function handleAvatarUpload(
   request: Request,

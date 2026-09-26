@@ -1,0 +1,10 @@
+process.env.NODE_ENV = "test";
+process.env.SERVICE_NAME = "call-server-test";
+process.env.SERVICE_VERSION = "0.1.0-test";
+process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/terqivo-call-test";
+process.env.REDIS_URL = "redis://127.0.0.1:6379";
+process.env.JWT_ACCESS_SECRET = "call-server-test-access-secret-0123456789";
+process.env.JWT_ISSUER = "terqivo-connect";
+process.env.JWT_AUDIENCE = "terqivo-clients";
+process.env.INTERNAL_SERVICE_SECRET = "call-server-test-internal-secret-0123456789";
+process.env.WEB_ORIGIN = "http://localhost:3000";

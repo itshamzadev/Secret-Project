@@ -1,0 +1,2 @@
+interface Entry<T> { value: T; expiresAt: number; }
+export class AiResponseCache<T> { private readonly values = new Map<string, Entry<T>>(); public constructor(private readonly ttlMs = 5 * 60_000) {} public get(key: string): T | null { const entry = this.values.get(key); if (entry === undefined) return null; if (entry.expiresAt <= Date.now()) { this.values.delete(key); return null; } return entry.value; } public set(key: string, value: T): void { this.values.set(key, { value, expiresAt: Date.now() + this.ttlMs }); } }

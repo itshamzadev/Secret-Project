@@ -156,6 +156,31 @@ const environmentSchema = z.object({
       typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().trim().min(1).max(100).optional(),
   ),
+  // Transitional Phase 5 bridge. These remain optional so the monolith keeps
+  // its existing local message path when the Message Server is not enabled.
+  MESSAGE_SERVICE_URL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().url().optional(),
+  ),
+  MEDIA_SERVICE_URL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().url().optional(),
+  ),
+  NOTIFICATION_SERVICE_URL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().url().optional(),
+  ),
+  INTERNAL_SERVICE_SECRET: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().min(32).optional(),
+  ),
+  INTERNAL_SERVICE_ISSUER: z.string().trim().min(1).default("terqivo-internal"),
+  INTERNAL_SERVICE_AUDIENCE: z.string().trim().min(1).default("terqivo-services"),
+  ENABLE_LEGACY_SOCKET_SERVER: z.coerce.boolean().default(true),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

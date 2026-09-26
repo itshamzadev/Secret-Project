@@ -9,7 +9,8 @@
     "pnpm": ">=11.24.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @terqivo/api dev",
+    "dev": "pnpm --filter @terqivo/gateway dev",
+    "legacy:dev": "pnpm --filter @terqivo/api dev",
     "admin-ui:dev": "pnpm --filter @terqivo/admin-ui dev",
     "admin-ui:build": "pnpm --filter @terqivo/admin-ui build",
     "web:dev": "pnpm --filter @terqivo/web dev",

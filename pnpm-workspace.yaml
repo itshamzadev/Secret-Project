@@ -1,6 +1,17 @@
 packages:
   - apps/*
   - packages/*
+  - servers/auth-server
+  - servers/gateway
+  - servers/message-server
+  - servers/realtime-hub
+  - servers/call-server
+  - servers/media-server
+  - servers/notification-server
+  - servers/relationship-server
+  - servers/status-server
+  - servers/search-server
+  - servers/admin-server
 allowBuilds:
   argon2: true
   electron: true

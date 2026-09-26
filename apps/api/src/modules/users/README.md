@@ -1,4 +1,9 @@
-# Users
+# Users compatibility boundary
+
+Identity profile mutation is implemented by `packages/auth-core` and exposed
+through `servers/auth-server`. This module retains the monolith compatibility
+route and the coupled avatar, privacy, block, and presence handlers used by
+legacy messaging/community features.
 
 Phase 1 provides the `User` model, username normalization and uniqueness,
 required normalized phone uniqueness, optional email normalization and

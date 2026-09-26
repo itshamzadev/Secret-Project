@@ -53,6 +53,8 @@ export function installSocketAuthentication(socketServer: {
     void authenticateSocket(socket)
       .then((context) => {
         socket.data.auth = context;
+        const accessToken = accessTokenFromSocket(socket);
+        if (accessToken !== null) socket.data.accessToken = accessToken;
         next();
       })
       .catch(() => next(new Error("Socket authentication failed")));

@@ -1,0 +1,18 @@
+{
+  "name": "@terqivo/servers",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.18.0"
+  },
+  "scripts": {
+    "loadbalancer": "node loadbalancer/server.mjs",
+    "callserver": "node callserver/server.js",
+    "callserver:compat": "node callserver/server.js",
+    "msgsserver": "pnpm exec tsx msgsserver/server.ts",
+    "msgsserver:compat": "node msgsserver/server.mjs",
+    "mediaserver": "node mediaserver/server.mjs",
+    "adminpanel": "node adminpanel/server.mjs",
+    "test": "node --test loadbalancer/routing.test.mjs"
+  }
+}

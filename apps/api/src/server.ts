@@ -6,6 +6,10 @@ import { connectDatabase, disconnectDatabase } from "./lib/database.js";
 import { logger } from "./lib/logger.js";
 import { connectRedis, disconnectRedis } from "./lib/redis.js";
 import { initializeAuthModels } from "./modules/auth/auth.service.js";
+import {
+  startSessionRevocationSubscriber,
+  stopSessionRevocationSubscriber,
+} from "./modules/auth/session-revocations.js";
 import { initializeContactModels } from "./modules/contacts/contact.service.js";
 import { initializeConversationModels } from "./modules/conversations/conversation.service.js";
 import { initializeMessageModels } from "./modules/messages/message.service.js";
@@ -58,6 +62,7 @@ export async function shutdown(signal: string, exitCode = 0): Promise<void> {
       await socketRuntime.close();
       socketRuntime = undefined;
     }
+    await stopSessionRevocationSubscriber();
     await closeHttpServer(httpServer);
     await Promise.all([disconnectDatabase(), disconnectRedis()]);
     process.exitCode = exitCode;
@@ -71,6 +76,7 @@ export async function shutdown(signal: string, exitCode = 0): Promise<void> {
 export async function startServer(): Promise<void> {
   try {
     await Promise.all([connectDatabase(), connectRedis()]);
+    await startSessionRevocationSubscriber();
     await initializeAuthModels();
     await initializeContactModels();
     await initializeConversationModels();
@@ -88,7 +94,11 @@ export async function startServer(): Promise<void> {
     await initializeChannelModels();
     await initializeStatusModels();
     await initializeReportModels();
-    socketRuntime = await createSocketServer(httpServer);
+    if (env.ENABLE_LEGACY_SOCKET_SERVER) {
+      socketRuntime = await createSocketServer(httpServer);
+    } else {
+      logger.info("Legacy public Socket.IO binding and call timeout worker disabled; Realtime Hub and Call Server own distributed realtime calls");
+    }
 
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {

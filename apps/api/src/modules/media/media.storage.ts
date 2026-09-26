@@ -1,15 +1,17 @@
 import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+import type { ReadableStream } from "node:stream/web";
 import { access, mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { W_OK } from "node:constants";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import type { ReadStream } from "node:fs";
+import { SignJWT } from "jose";
 
 import { env } from "../../config/env.js";
 import { AppError } from "../../core/errors.js";
 import { logger } from "../../lib/logger.js";
 
 export interface MediaFile {
-  stream: ReadStream;
+  stream: Readable;
   size: number;
 }
 
@@ -103,21 +105,68 @@ class UnconfiguredMediaStorage implements MediaStorage {
   }
 }
 
+class MediaServiceStorage implements MediaStorage {
+  public async put(key: string, data: Buffer): Promise<void> {
+    await this.request(`/internal/media/files/${encodeURIComponent(key)}`, "PUT", data);
+  }
+
+  public async remove(key: string): Promise<void> {
+    await this.request(`/internal/media/files/${encodeURIComponent(key)}`, "DELETE");
+  }
+
+  public async open(key: string): Promise<MediaFile | null> {
+    const response = await this.request(`/internal/media/files/${encodeURIComponent(key)}`, "GET", undefined, true);
+    if (response === null || response.body === null) return null;
+    return {
+      stream: Readable.fromWeb(response.body as ReadableStream),
+      size: Number(response.headers.get("content-length") ?? 0),
+    };
+  }
+
+  private async request(path: string, method: "GET" | "PUT" | "DELETE", body?: Buffer, allowNotFound = false): Promise<Response | null> {
+    if (env.MEDIA_SERVICE_URL === undefined || env.INTERNAL_SERVICE_SECRET === undefined) throw new AppError({ code: "MEDIA_SERVICE_UNAVAILABLE", message: "Media storage is temporarily unavailable.", statusCode: 503 });
+    const requestInit: RequestInit = {
+      method,
+      headers: { "x-internal-service-token": await mediaServiceToken(), ...(body === undefined ? {} : { "content-type": "application/octet-stream" }) },
+      signal: AbortSignal.timeout(30_000),
+    };
+    if (body !== undefined) requestInit.body = new Uint8Array(body);
+    const response = await fetch(`${env.MEDIA_SERVICE_URL}${path}`, requestInit).catch(() => { throw new AppError({ code: "MEDIA_SERVICE_UNAVAILABLE", message: "Media storage is temporarily unavailable.", statusCode: 503 }); });
+    if (allowNotFound && response.status === 404) return null;
+    if (!response.ok) throw new AppError({ code: response.status >= 500 ? "MEDIA_SERVICE_UNAVAILABLE" : "MEDIA_STORAGE_ERROR", message: response.status >= 500 ? "Media storage is temporarily unavailable." : "The media operation was rejected.", statusCode: response.status >= 500 ? 503 : response.status });
+    return response;
+  }
+}
+
 const localMediaStorage =
   env.MEDIA_STORAGE_DRIVER === "local"
     ? new LocalMediaStorage(env.MEDIA_STORAGE_PATH)
     : null;
 
 export const mediaStorage: MediaStorage =
-  localMediaStorage ?? new UnconfiguredMediaStorage();
+  env.MEDIA_SERVICE_URL !== undefined
+    ? new MediaServiceStorage()
+    : localMediaStorage ?? new UnconfiguredMediaStorage();
 
 export async function initializeMediaStorage(): Promise<void> {
-  if (localMediaStorage === null) return;
+  if (localMediaStorage === null || env.MEDIA_SERVICE_URL !== undefined) return;
   await localMediaStorage.initialize();
   logger.info(
     { driver: "local", path: env.MEDIA_STORAGE_PATH },
     "Media storage initialized",
   );
+}
+
+async function mediaServiceToken(): Promise<string> {
+  if (env.INTERNAL_SERVICE_SECRET === undefined) throw new AppError({ code: "MEDIA_SERVICE_UNAVAILABLE", message: "Media storage is temporarily unavailable.", statusCode: 503 });
+  return new SignJWT({ serviceName: "legacy-api" })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(env.INTERNAL_SERVICE_ISSUER)
+    .setAudience(env.INTERNAL_SERVICE_AUDIENCE)
+    .setSubject("legacy-api")
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + 60)
+    .sign(new TextEncoder().encode(env.INTERNAL_SERVICE_SECRET));
 }
 
 function isNodeError(value: unknown): value is NodeJS.ErrnoException {

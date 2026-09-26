@@ -48,6 +48,25 @@ describe("API foundation", () => {
     });
   });
 
+  it("propagates safe request and correlation IDs without changing the body", async () => {
+    const response = await request(app)
+      .get("/api/v1/health")
+      .set("X-Request-ID", "request-from-client")
+      .set("X-Correlation-ID", "correlation-from-client");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["x-request-id"]).toBe("request-from-client");
+    expect(response.headers["x-correlation-id"]).toBe(
+      "correlation-from-client",
+    );
+    expect(response.body.data).toEqual({
+      status: "ok",
+      database: "connected",
+      redis: "connected",
+      uptime: 12.34,
+    });
+  });
+
   it("does not upgrade assets when the public origin is not HTTPS", async () => {
     const response = await request(app).get("/api/v1/health");
 

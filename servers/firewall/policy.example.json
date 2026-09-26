@@ -1,0 +1,15 @@
+{
+  "public": {
+    "tcp": [443]
+  },
+  "private": {
+    "tcp": [5000, 5101, 5102, 5103, 5104, 27017, 6379]
+  },
+  "websocketPaths": ["/socket.io/"],
+  "notes": [
+    "Terminate TLS at the load balancer or firewall.",
+    "Allow internal service ports only from the private service network.",
+    "Do not expose MongoDB or Redis to the public internet.",
+    "Apply authentication, WAF rules, and rate limits at the edge."
+  ]
+}
