@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 import type { AdminServerConfig } from "../config/env.js";
 
-export async function connectDatabase(config: AdminServerConfig): Promise<void> {
+export async function connectDatabase(config: Pick<AdminServerConfig, "MONGODB_URI">): Promise<void> {
   await mongoose.connect(config.MONGODB_URI);
 }
 

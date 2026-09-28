@@ -12,13 +12,13 @@ import { disableUser, getUserStats, listUsers, updateUserBadges, updateUserPassw
 import { getMessageStats, listChannels, listGroups, updateChannelBadges, updateGroupBadges } from "../../clients/message.client.js";
 import { getCallStats } from "../../clients/call.client.js";
 import { getNotificationStats } from "../../clients/notification.client.js";
+import { normalizeAdminEmail } from "./email.js";
 
 function invalidCredentials(): AppError { return new AppError({ code: "INVALID_ADMIN_CREDENTIALS", message: "The administrative credentials are invalid.", statusCode: 401 }); }
-function normalizeEmail(value: string): string { return value.trim().toLowerCase(); }
 const dummyHash = "$argon2id$v=19$m=65536,p=4,t=3$YJ5cYMGIjbvI2aW15hnzlQ$3DmlwtIF3Ee/Jx0r7UJwHVROMLF4oRMpEQbZgyOcuXg";
 
 export async function loginAdmin(config: AdminServerConfig, input: AdminLoginInput): Promise<AdminAuthenticationResponse> {
-  const admin = await AdminUserModel.findOne({ emailNormalized: normalizeEmail(input.email) }).select("+passwordHash").exec();
+  const admin = await AdminUserModel.findOne({ emailNormalized: normalizeAdminEmail(input.email) }).select("+passwordHash").exec();
   const valid = await argon2.verify(admin?.passwordHash ?? dummyHash, input.password).catch(() => false);
   if (!valid || admin === null || admin.accountStatus !== "active") throw invalidCredentials();
   admin.lastLoginAt = new Date();
