@@ -16,6 +16,7 @@ const config: AuthServerConfig = {
   SERVICE_NAME: "auth-server",
   SERVICE_VERSION: "test",
   PORT: 5101,
+  TRUSTED_PROXY_HOPS: 2,
   MONGODB_URI: "mongodb://127.0.0.1:27017/terqivo_connect_test",
   WEB_ORIGIN: "http://localhost:5173",
   REDIS_URL: "redis://127.0.0.1:6379",
@@ -66,6 +67,63 @@ describe("Auth Server self-contained compatibility contract", () => {
     expect(response.status).toBe(201);
     expect(response.body.data.accessToken).toEqual(expect.any(String));
     expect(response.body.data.session.id).toEqual(expect.any(String));
+  });
+
+  it("keeps username-exists, login, and duplicate identity conflicts compatible", async () => {
+    const registration = await request(server).post("/api/v1/auth/register").send({
+      username: "Duplicate.User",
+      name: "Duplicate User",
+      email: "duplicate@example.com",
+      phone: "+14155550120",
+      password: "correct horse battery staple",
+      platform: "android",
+    });
+    expect(registration.status).toBe(201);
+
+    const exists = await request(server).get("/api/v1/auth/username-exists").query({ username: "duplicate.user" });
+    expect(exists.status).toBe(200);
+    expect(exists.body.data.exists).toBe(true);
+
+    const invalidLogin = await request(server).post("/api/v1/auth/login").send({
+      identifier: "Duplicate.User",
+      password: "wrong-password",
+      platform: "android",
+    });
+    expect(invalidLogin.status).toBe(401);
+    expect(invalidLogin.body.error.code).toBe("INVALID_CREDENTIALS");
+
+    const duplicateUsername = await request(server).post("/api/v1/auth/register").send({
+      username: "duplicate.user",
+      name: "Another User",
+      email: "duplicate-username@example.com",
+      phone: "+14155550121",
+      password: "correct horse battery staple",
+      platform: "android",
+    });
+    expect(duplicateUsername.status).toBe(409);
+    expect(duplicateUsername.body.error.code).toBe("USERNAME_TAKEN");
+
+    const duplicateEmail = await request(server).post("/api/v1/auth/register").send({
+      username: "duplicate.email",
+      name: "Another User",
+      email: "DUPLICATE@example.com",
+      phone: "+14155550122",
+      password: "correct horse battery staple",
+      platform: "android",
+    });
+    expect(duplicateEmail.status).toBe(409);
+    expect(duplicateEmail.body.error.code).toBe("EMAIL_TAKEN");
+
+    const duplicatePhone = await request(server).post("/api/v1/auth/register").send({
+      username: "duplicate.phone",
+      name: "Another User",
+      email: "duplicate-phone@example.com",
+      phone: "+14155550120",
+      password: "correct horse battery staple",
+      platform: "android",
+    });
+    expect(duplicatePhone.status).toBe(409);
+    expect(duplicatePhone.body.error.code).toBe("PHONE_TAKEN");
   });
 
   it("preserves refresh rotation and reuse revocation", async () => {

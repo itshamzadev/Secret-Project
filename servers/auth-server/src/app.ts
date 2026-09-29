@@ -1,11 +1,11 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Express, type Request, type RequestHandler } from "express";
 import helmet from "helmet";
 import { ZodError } from "zod";
 
 import { AppError } from "./internal/auth-core/contracts.js";
-import { createRequestContext, correlationIdHeader, createServiceLogger, requestIdHeader, childLogger, type Logger } from "./logging/logger.js";
+import { createRequestContext, correlationIdHeader, createServiceLogger, requestIdHeader, childLogger, type Logger, type RequestContext } from "./logging/logger.js";
 import { configureAuthCore, createAuthRouter, createIdentityRouter } from "./internal/auth-core/index.js";
 import { createInternalRouter } from "./internal/routes.js";
 
@@ -16,6 +16,10 @@ export interface AuthAppDependencies {
   readonly logger?: Logger;
   readonly getDatabaseStatus?: () => "connected" | "disconnected";
   readonly getRedisStatus?: () => "connected" | "disconnected";
+}
+
+interface ContextualRequest extends Request {
+  requestContext?: RequestContext;
 }
 
 export function createAuthApp(config: AuthServerConfig, dependencies: AuthAppDependencies = {}): Express {
@@ -34,6 +38,10 @@ export function createAuthApp(config: AuthServerConfig, dependencies: AuthAppDep
   const getRedis = dependencies.getRedisStatus ?? getRedisStatus;
   const app = express();
   app.disable("x-powered-by");
+  // Auth Server is private and only reachable through the known internal
+  // proxy chain. A bounded hop count lets express-rate-limit derive the client
+  // address without accepting arbitrary public X-Forwarded-For values.
+  app.set("trust proxy", config.TRUSTED_PROXY_HOPS);
   app.use(requestContextMiddleware(logger));
   app.use(helmet());
   app.use("/api", cors({
@@ -73,6 +81,7 @@ function requestContextMiddleware(logger: Logger): RequestHandler {
     if (incomingRequestId !== undefined) input.requestId = incomingRequestId;
     if (incomingCorrelationId !== undefined) input.correlationId = incomingCorrelationId;
     const context = createRequestContext(input);
+    (request as ContextualRequest).requestContext = context;
     response.setHeader(requestIdHeader, context.requestId);
     response.setHeader(correlationIdHeader, context.correlationId);
     const requestLogger = childLogger(logger, { requestId: context.requestId, correlationId: context.correlationId });
@@ -83,16 +92,59 @@ function requestContextMiddleware(logger: Logger): RequestHandler {
 }
 
 function createErrorHandler(logger: Logger, nodeEnv: AuthServerConfig["NODE_ENV"]): ErrorRequestHandler {
-  return (error: unknown, _request, response, next) => {
+  return (error: unknown, request, response, next) => {
     if (response.headersSent) { next(error); return; }
     let statusCode = 500;
     let code = "INTERNAL_SERVER_ERROR";
     let message = "An unexpected error occurred.";
     let details: unknown;
-    if (error instanceof AppError) { statusCode = error.statusCode; code = error.code; message = error.message; details = error.details; }
+    if (isRateLimitError(error)) { statusCode = 429; code = "AUTH_RATE_LIMIT_EXCEEDED"; message = "Too many authentication attempts. Please try again later."; }
+    else if (isInvalidJsonError(error)) { statusCode = 400; code = "INVALID_JSON"; message = "The request body contains invalid JSON."; }
+    else if (error instanceof AppError) { statusCode = error.statusCode; code = error.code; message = error.message; details = error.details; }
     else if (error instanceof ZodError) { statusCode = 400; code = "VALIDATION_ERROR"; message = "Request validation failed."; details = error.issues; }
     else if (typeof error === "object" && error !== null && "type" in error && error.type === "entity.too.large") { statusCode = 413; code = "REQUEST_TOO_LARGE"; message = "Request body is too large."; }
-    if (statusCode >= 500) logger.error({ err: error, statusCode }, message); else logger.warn({ err: error, statusCode }, message);
+    const requestContext = (request as ContextualRequest).requestContext;
+    const logFields = {
+      requestId: requestContext?.requestId,
+      correlationId: requestContext?.correlationId,
+      endpoint: request.path,
+      statusCode,
+      errorCode: code,
+      ...safeErrorMetadata(error),
+    };
+    if (statusCode >= 500) logger.error(logFields, message); else logger.warn(logFields, message);
     response.status(statusCode).json({ success: false, error: { code, message: nodeEnv === "production" && statusCode >= 500 ? "An unexpected error occurred." : message, ...(details === undefined ? {} : { details }) } });
   };
+}
+
+interface InvalidJsonError {
+  type: "entity.parse.failed";
+  status?: number;
+}
+
+function isRateLimitError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 429;
+}
+
+function isInvalidJsonError(error: unknown): error is InvalidJsonError {
+  return typeof error === "object" && error !== null && "type" in error && error.type === "entity.parse.failed";
+}
+
+function safeErrorMetadata(error: unknown): Record<string, unknown> {
+  if (isInvalidJsonError(error)) return { errorType: "InvalidJson" };
+  if (error instanceof ZodError) {
+    return {
+      errorType: "ValidationError",
+      validationFields: [...new Set(error.issues.map((issue) => issue.path.join(".") || "body"))],
+    };
+  }
+  if (typeof error !== "object" || error === null) return { errorType: typeof error };
+  const metadata: Record<string, unknown> = { errorType: error.constructor?.name ?? "UnknownError" };
+  if ("code" in error && typeof error.code === "number") {
+    metadata.mongoCode = error.code;
+  }
+  if ("keyPattern" in error && typeof error.keyPattern === "object" && error.keyPattern !== null) {
+    metadata.mongoKeyFields = Object.keys(error.keyPattern);
+  }
+  return metadata;
 }

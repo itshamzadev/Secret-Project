@@ -38,6 +38,11 @@ channel. Realtime Hub subscribes to that channel and disconnects matching
 Socket.IO sessions; paths, namespaces, events, and the Redis adapter remain
 unchanged. Redis is therefore required for Auth Server readiness.
 
+Auth Server trusts a bounded forwarded-proxy chain using
+`TRUSTED_PROXY_HOPS`. The production Cloudflare -> Apache -> Gateway -> Auth
+Server topology uses `TRUSTED_PROXY_HOPS=2`; do not replace this with
+unrestricted `trust proxy=true`.
+
 ## Local topology
 
 ```text

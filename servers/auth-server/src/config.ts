@@ -5,6 +5,10 @@ const environmentSchema = z.object({
   SERVICE_NAME: z.string().trim().min(1).default("auth-server"),
   SERVICE_VERSION: z.string().trim().min(1).default("0.1.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(5101),
+  // Cloudflare -> Apache -> Gateway -> Auth Server. The Gateway and Apache
+  // are the two trusted proxy hops represented in Auth Server's forwarded
+  // headers; keep this bounded instead of trusting arbitrary clients.
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(2),
   MONGODB_URI: z.string().trim().min(1),
   REDIS_URL: z.string().trim().min(1),
   WEB_ORIGIN: z.string().trim().min(1).refine(
