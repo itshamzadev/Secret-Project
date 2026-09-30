@@ -164,6 +164,18 @@ describe("Realtime Hub calls and failure isolation", () => {
     expect(acceptAck).toMatchObject({ success: true, data: { changed: true } });
   });
 
+  it("relays in-call chat only to the other active call participant", async () => {
+    const runtime = await createRuntime();
+    const alice = await connect(runtime.baseUrl, await token());
+    const bob = await connect(runtime.baseUrl, await token(bobId, "session-b"));
+    const received = event(bob, "call:chat:new");
+    const ack = await new Promise<unknown>((resolve) => alice.emit("call:chat:send", { callId: "eeeeeeeeeeeeeeeeeeeeeeee", text: "quietly during the call" }, resolve));
+    expect(ack).toMatchObject({ success: true, data: { message: { callId: "eeeeeeeeeeeeeeeeeeeeeeee", senderId: aliceId, text: "quietly during the call" } } });
+    expect(await received).toMatchObject({ callId: "eeeeeeeeeeeeeeeeeeeeeeee", senderId: aliceId, text: "quietly during the call" });
+    expect(mockState.requests).toContain("/internal/realtime/calls/authorize-signal");
+    expect(mockState.requests).toContain("/internal/realtime/calls/chat-activity");
+  });
+
   it("keeps message transport usable when the call backend is unavailable", async () => {
     const runtime = await createRuntime();
     const alice = await connect(runtime.baseUrl, await token());

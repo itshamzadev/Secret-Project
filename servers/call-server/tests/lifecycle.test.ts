@@ -61,10 +61,68 @@ describe("Call Server lifecycle compatibility", () => {
     const accepted = await request(app).post("/internal/realtime/calls/accept").set("x-internal-service-token", token).set("Authorization", `Bearer ${bobToken}`).send({ callId });
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.call.status).toBe("accepted");
+    const switchedToVideo = await request(app).post("/internal/realtime/calls/media-type").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ callId, type: "video" });
+    expect(switchedToVideo.status).toBe(200);
+    expect(switchedToVideo.body.data.call.type).toBe("video");
+    const switchedToVoice = await request(app).post("/internal/realtime/calls/media-type").set("x-internal-service-token", token).set("Authorization", `Bearer ${bobToken}`).send({ callId, type: "voice" });
+    expect(switchedToVoice.status).toBe(200);
+    expect(switchedToVoice.body.data.call.type).toBe("voice");
     const ended = await request(app).post("/internal/realtime/calls/end").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ callId });
     expect(ended.status).toBe(200);
     expect(ended.body.data.call.status).toBe("ended");
     expect((await CallModel.findById(callId).lean().exec())?.status).toBe("ended");
+  });
+
+  it("allows an immediate retry after a call is cancelled", async () => {
+    const token = await serviceToken();
+    const first = await request(app).post("/internal/realtime/calls/start").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ calleeId: bobId, type: "voice" });
+    expect(first.status).toBe(201);
+
+    const cancelled = await request(app).post("/internal/realtime/calls/cancel").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ callId: first.body.data.call.id });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.data.call.status).toBe("cancelled");
+
+    const retry = await request(app).post("/internal/realtime/calls/start").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ calleeId: bobId, type: "voice" });
+    expect(retry.status).toBe(201);
+  });
+
+  it("closes a ringing call when the caller ends during the accept race", async () => {
+    const token = await serviceToken();
+    const first = await request(app).post("/internal/realtime/calls/start").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ calleeId: bobId, type: "voice" });
+    expect(first.status).toBe(201);
+
+    const ended = await request(app).post("/internal/realtime/calls/end").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ callId: first.body.data.call.id });
+    expect(ended.status).toBe(200);
+    expect(ended.body.data.call.status).toBe("cancelled");
+
+    const retry = await request(app).post("/internal/realtime/calls/start").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ calleeId: bobId, type: "voice" });
+    expect(retry.status).toBe(201);
+  });
+
+  it("reconciles a stale ringing call instead of returning CALL_BUSY forever", async () => {
+    const token = await serviceToken();
+    const staleAt = new Date(Date.now() - (env.CALL_RING_TIMEOUT_SECONDS + 1) * 1000);
+    const stale = await CallModel.create({
+      callerId: aliceId,
+      calleeId: bobId,
+      conversationId: null,
+      type: "voice",
+      status: "ringing",
+      initiatedAt: staleAt,
+      answeredAt: null,
+      endedAt: null,
+      durationSeconds: null,
+      endedBy: null,
+      endReason: null,
+      callerSessionId: "alice-session",
+      acceptedBySessionId: null,
+      createdAt: staleAt,
+      updatedAt: staleAt,
+    });
+
+    const retry = await request(app).post("/internal/realtime/calls/start").set("x-internal-service-token", token).set("Authorization", `Bearer ${aliceToken}`).send({ calleeId: bobId, type: "voice" });
+    expect(retry.status).toBe(201);
+    expect((await CallModel.findById(stale._id).lean().exec())?.status).toBe("missed");
   });
 
   it("does not allow a third user to authorize signaling", async () => {

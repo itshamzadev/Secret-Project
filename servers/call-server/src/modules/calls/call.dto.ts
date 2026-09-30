@@ -10,5 +10,5 @@ export function toCallSignalDto(call: CallDocument): CallSignalDto {
 }
 
 export function toCallDto(call: CallDocument, currentUserId: string, otherUser: UserDocument): CallDto {
-  return { id: call._id.toString(), type: call.type, direction: call.callerId.toString() === currentUserId ? "outgoing" : "incoming", otherUser: toCallUserDto(otherUser), status: call.status, initiatedAt: call.initiatedAt.toISOString(), answeredAt: call.answeredAt?.toISOString() ?? null, endedAt: call.endedAt?.toISOString() ?? null, durationSeconds: call.durationSeconds, endReason: call.endReason };
+  return { id: call._id.toString(), type: call.type, direction: call.callerId.toString() === currentUserId ? "outgoing" : "incoming", otherUser: toCallUserDto(otherUser), status: call.status, initiatedAt: call.initiatedAt.toISOString(), answeredAt: call.answeredAt?.toISOString() ?? null, endedAt: call.endedAt?.toISOString() ?? null, durationSeconds: call.durationSeconds, endReason: call.endReason, callChatMessageCount: call.callChatMessageCount ?? 0 };
 }

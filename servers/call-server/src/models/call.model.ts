@@ -12,6 +12,7 @@ const schema = new Schema<CallEntity>({
   answeredAt: { type: Date, default: null },
   endedAt: { type: Date, default: null },
   durationSeconds: { type: Number, default: null },
+  callChatMessageCount: { type: Number, default: 0 },
   endedBy: { type: Schema.Types.ObjectId, default: null },
   endReason: { type: String, default: null },
   callerSessionId: { type: String, required: true },

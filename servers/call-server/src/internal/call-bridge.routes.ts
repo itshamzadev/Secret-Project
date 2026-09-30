@@ -4,18 +4,26 @@ import { z } from "zod";
 import { AppError } from "../core/errors.js";
 import { requireRealtimeHubService } from "./service-auth.js";
 import { authenticate, requireAuthContext } from "../middleware/authenticate.js";
-import { callIdParamsSchema, callStartSchema } from "../modules/calls/call.validation.js";
-import { acceptCall, assertSignalingAllowed, callSignal, cancelCall, cancelCallsForSession, declineCall, endCall, failCall, startCall } from "../modules/calls/call.service.js";
+import { callIdParamsSchema, callMediaTypeSchema, callStartSchema } from "../modules/calls/call.validation.js";
+import { acceptCall, assertSignalingAllowed, callSignal, cancelCall, cancelCallsForSession, changeCallType, declineCall, endCall, failCall, recordCallChatActivity, startCall } from "../modules/calls/call.service.js";
 import { toCallUserDto } from "../modules/calls/call.dto.js";
 import { clearCallTimeout, scheduleCallTimeout } from "../realtime/timeout.js";
 import { callEvent, publishCallEvent } from "../realtime/events.js";
 import { notifyIncomingCall } from "../realtime/push.js";
 
-const signalSchema = z.object({ callId: z.string().trim().min(1), kind: z.enum(["offer", "answer", "ice"]) });
+const signalSchema = z.object({ callId: z.string().trim().min(1), kind: z.enum(["offer", "answer", "ice", "chat"]) });
 const sessionSchema = z.object({ sessionId: z.string().trim().min(1).max(256) });
 
 function actionEvent(event: "call:declined" | "call:cancelled" | "call:ended" | "call:failed", call: Parameters<typeof callEvent>[0]) {
   return { ...callEvent(call, event), targetUserIds: [call.callerId.toString(), call.calleeId.toString()] };
+}
+
+function terminalEventForCall(call: Parameters<typeof callEvent>[0], fallback: "call:declined" | "call:cancelled" | "call:ended" | "call:failed") {
+  if (call.status === "declined") return actionEvent("call:declined", call);
+  if (call.status === "cancelled") return actionEvent("call:cancelled", call);
+  if (call.status === "failed") return actionEvent("call:failed", call);
+  if (call.status === "ended") return actionEvent("call:ended", call);
+  return actionEvent(fallback, call);
 }
 
 export function createCallBridgeRouter(): Router {
@@ -48,7 +56,7 @@ export function createCallBridgeRouter(): Router {
       try {
         const { callId } = callIdParamsSchema.parse(request.body);
         const result = await operation(requireAuthContext(request), callId);
-        if (result.changed) {
+        if (result.changed || (event !== "call:accepted" && ["declined", "cancelled", "ended", "failed", "missed"].includes(result.call.status))) {
           await clearCallTimeout(result.call._id.toString());
           if (event === "call:accepted") {
             await publishCallEvent({ ...callEvent(result.call, event), targetUserIds: [result.call.callerId.toString()] });
@@ -57,7 +65,7 @@ export function createCallBridgeRouter(): Router {
             }
             await publishCallEvent({ ...callEvent(result.call, "call:answered-elsewhere"), targetUserIds: [result.call.calleeId.toString()], excludeSessionId: result.call.acceptedBySessionId ?? undefined });
           } else {
-            await publishCallEvent(actionEvent(event, result.call));
+            await publishCallEvent(terminalEventForCall(result.call, event));
           }
         }
         response.status(200).json({ success: true, data: { call: callSignal(result.call), changed: result.changed } });
@@ -65,13 +73,30 @@ export function createCallBridgeRouter(): Router {
     });
   }
 
+  router.post("/calls/media-type", authenticate, async (request, response, next) => {
+    try {
+      const input = callMediaTypeSchema.parse(request.body);
+      const result = await changeCallType(requireAuthContext(request), input.callId, input.type);
+      if (result.changed) {
+        await publishCallEvent({ ...callEvent(result.call, "call:media-type"), targetUserIds: [result.call.callerId.toString(), result.call.calleeId.toString()] });
+      }
+      response.status(200).json({ success: true, data: { call: callSignal(result.call), changed: result.changed } });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/calls/chat-activity", authenticate, async (request, response, next) => {
+    try {
+      const { callId } = callIdParamsSchema.parse(request.body);
+      const count = await recordCallChatActivity(requireAuthContext(request), callId);
+      response.status(200).json({ success: true, data: { count } });
+    } catch (error) { next(error); }
+  });
+
   router.post("/calls/authorize-signal", authenticate, async (request, response, next) => {
     try {
       const input = signalSchema.parse(request.body);
       const context = requireAuthContext(request);
       const target = await assertSignalingAllowed(context, input.callId);
-      const isCaller = target.call.callerId.toString() === context.userId;
-      if ((input.kind === "offer" && !isCaller) || (input.kind === "answer" && isCaller)) throw new AppError({ code: "CALL_SIGNALING_FORBIDDEN", message: "That signaling message is not valid for this participant.", statusCode: 403 });
       response.status(200).json({ success: true, data: { otherUserId: target.otherUserId } });
     } catch (error) { next(error); }
   });

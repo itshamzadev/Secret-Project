@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 
 import { Server, type Socket } from "socket.io";
@@ -10,7 +11,7 @@ import type { RedisRuntime } from "../redis/client.js";
 import { subscribeChannel, SESSION_REVOKED_CHANNEL } from "../redis/subscriptions.js";
 import { getConversationParticipants, authorizeTyping, markDelivered, markRead, sendEncryptedMessage, sendTextMessage } from "../clients/message-server.client.js";
 import { recordPresenceEnd, recordPresenceStart } from "../clients/auth-server.client.js";
-import { acceptCall, authorizeSignal, cancelCall, declineCall, endCall, failCall, sessionDisconnected, startCall, type CallSignal } from "../clients/call-server.client.js";
+import { acceptCall, authorizeSignal, cancelCall, changeCallType, declineCall, endCall, failCall, recordCallChatActivity, sessionDisconnected, startCall, type CallSignal } from "../clients/call-server.client.js";
 import { installRedisAdapter } from "../redis/adapter.js";
 import { registerPresence, type PresenceRegistration } from "./presence.js";
 import { sessionRoom, userRoom } from "./rooms.js";
@@ -45,6 +46,8 @@ const readSchema = z.object({ conversationId: z.string().regex(/^[a-f\d]{24}$/i)
 const typingSchema = z.object({ conversationId: z.string().regex(/^[a-f\d]{24}$/i) });
 const callStartSchema = z.object({ calleeId: z.string().regex(/^[a-f\d]{24}$/i), type: z.enum(["voice", "video"]) });
 const callIdSchema = z.object({ callId: z.string().regex(/^[a-f\d]{24}$/i) });
+const callMediaTypeSchema = z.object({ callId: z.string().regex(/^[a-f\d]{24}$/i), type: z.enum(["voice", "video"]) });
+const callChatSchema = z.object({ callId: z.string().regex(/^[a-f\d]{24}$/i), text: z.string().trim().min(1).max(1000) });
 const descriptionSchema = z.object({ callId: z.string().regex(/^[a-f\d]{24}$/i), description: z.object({ type: z.enum(["offer", "answer"]), sdp: z.string().min(1).max(100_000) }) });
 const iceSchema = z.object({ callId: z.string().regex(/^[a-f\d]{24}$/i), candidate: z.object({ candidate: z.string().min(1).max(4096), sdpMid: z.string().max(256).nullable(), sdpMLineIndex: z.number().int().min(0).max(100).nullable() }) });
 
@@ -166,6 +169,36 @@ function installCallHandlers(io: Server, socket: Socket): void {
   action("call:cancel", (callId) => cancelCall(context(socket), token(socket), callId));
   action("call:end", (callId) => endCall(context(socket), token(socket), callId));
   action("call:fail", (callId) => failCall(context(socket), token(socket), callId));
+
+  socket.on("call:media-type", (payload: unknown, ack?: SocketAck<unknown>) => {
+    const parsed = callMediaTypeSchema.safeParse(payload);
+    if (!parsed.success) { acknowledge(ack, validationFailure); return; }
+    void changeCallType(context(socket), token(socket), parsed.data.callId, parsed.data.type)
+      .then((result) => acknowledge(ack, { success: true, data: { call: result.call, changed: result.changed } }))
+      .catch((error: unknown) => { logFailure(socket, "call:media-type", error); acknowledge(ack, errorResponse(error)); });
+  });
+
+  socket.on("call:chat:send", (payload: unknown, ack?: SocketAck<unknown>) => {
+    const parsed = callChatSchema.safeParse(payload);
+    if (!parsed.success) { acknowledge(ack, validationFailure); return; }
+    void authorizeSignal(context(socket), token(socket), parsed.data.callId, "chat")
+      .then(async (target) => {
+        await recordCallChatActivity(context(socket), token(socket), parsed.data.callId);
+        const message = {
+          callId: parsed.data.callId,
+          messageId: randomUUID(),
+          senderId: context(socket).userId,
+          text: parsed.data.text,
+          sentAt: new Date().toISOString(),
+        };
+        io.to(userRoom(target.otherUserId)).emit("call:chat:new", message);
+        acknowledge(ack, { success: true, data: { message } });
+      })
+      .catch((error: unknown) => {
+        logFailure(socket, "call:chat:send", error);
+        acknowledge(ack, errorResponse(error));
+      });
+  });
 
   const relay = (event: "webrtc:offer" | "webrtc:answer" | "webrtc:ice-candidate", kind: "offer" | "answer" | "ice", schema: z.ZodType<Record<string, unknown>>): void => {
     socket.on(event, (payload: unknown, ack?: SocketAck<{ relayed: boolean }>) => {

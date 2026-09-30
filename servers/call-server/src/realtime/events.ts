@@ -7,7 +7,7 @@ export const CALL_EVENT_CHANNEL = "terqivo:call-events:v1";
 
 export interface CallRealtimeEvent {
   eventId: string;
-  kind: "call:ringing" | "call:incoming" | "call:accepted" | "call:answered-elsewhere" | "call:declined" | "call:cancelled" | "call:ended" | "call:failed" | "call:missed";
+  kind: "call:ringing" | "call:incoming" | "call:accepted" | "call:answered-elsewhere" | "call:media-type" | "call:declined" | "call:cancelled" | "call:ended" | "call:failed" | "call:missed";
   call: CallSignalDto;
   caller?: { id: string; username: string; displayName: string; avatarUrl: string | null; badges?: string[] };
   targetUserIds?: string[];

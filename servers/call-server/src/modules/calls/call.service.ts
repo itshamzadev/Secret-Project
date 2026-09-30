@@ -54,6 +54,56 @@ async function reserveActiveCallKey(userId: string, callId: string): Promise<boo
   return (await redisClient.set(key, callId, { NX: true, EX: env.CALL_ACTIVE_TTL_SECONDS })) === "OK";
 }
 
+function callParticipantsQuery(userIds: readonly string[]): Record<string, unknown> {
+  const ids = userIds.map(objectId);
+  return {
+    $or: [
+      { callerId: { $in: ids } },
+      { calleeId: { $in: ids } },
+    ],
+  };
+}
+
+/**
+ * Redis locks are deliberately short-lived safety locks, not the source of
+ * truth. If a process or network dies before publishing a terminal transition,
+ * the database can otherwise leave a user permanently busy. Reconcile only
+ * calls that are older than the same lifecycle limits already used by the
+ * timeout coordinator.
+ */
+async function reconcileStaleActiveCalls(userIds: readonly string[]): Promise<void> {
+  const now = Date.now();
+  const candidates = await CallModel.find({
+    ...callParticipantsQuery(userIds),
+    status: { $in: activeCallStatuses },
+  }).select({ status: 1, initiatedAt: 1, answeredAt: 1, updatedAt: 1 }).exec();
+
+  for (const candidate of candidates) {
+    const lastActivity = candidate.status === "ringing" ? candidate.initiatedAt : candidate.updatedAt;
+    const maxAge = candidate.status === "ringing"
+      ? env.CALL_RING_TIMEOUT_SECONDS * 1000
+      : env.CALL_ACTIVE_TTL_SECONDS * 1000;
+    if (now - lastActivity.getTime() < maxAge) continue;
+
+    const status = candidate.status === "ringing" ? "missed" : "failed";
+    const endReason = candidate.status === "ringing" ? "timeout" : "connection-failed";
+    const endedAt = new Date();
+    const stale = await CallModel.findOneAndUpdate(
+      { _id: candidate._id, status: candidate.status },
+      {
+        $set: {
+          status,
+          endedAt,
+          durationSeconds: candidate.answeredAt === null ? 0 : Math.max(0, Math.floor((endedAt.getTime() - candidate.answeredAt.getTime()) / 1000)),
+          endReason,
+        },
+      },
+      { returnDocument: "after" },
+    ).exec();
+    if (stale !== null) await releaseActiveCallKeys(stale);
+  }
+}
+
 async function enforceCallRateLimit(userId: string): Promise<void> {
   const window = Math.floor(Date.now() / (callRateWindowSeconds * 1000));
   const count = await redisClient.incr(`terqivo:call-rate:${userId}:${window}`);
@@ -88,6 +138,7 @@ export async function startCall(context: AuthContext, input: CallStartInput): Pr
   const [caller, callee] = await Promise.all([getUserById(context.userId), getUserById(input.calleeId)]);
   if (caller === null || caller.accountStatus !== "active" || callee === null || callee.accountStatus !== "active") throw targetUnavailable();
   await assertUsersCanInteract(context.userId, input.calleeId);
+  await reconcileStaleActiveCalls([context.userId, input.calleeId]);
   const existing = await CallModel.findOne({ $or: [
     ...activeCallStatuses.map((status) => ({ callerId: objectId(context.userId), status })),
     ...activeCallStatuses.map((status) => ({ calleeId: objectId(context.userId), status })),
@@ -104,7 +155,7 @@ export async function startCall(context: AuthContext, input: CallStartInput): Pr
   try {
     const conversation = await ConversationModel.findOne({ directKey: directConversationKey(context.userId, input.calleeId) }).select({ _id: 1 }).exec();
     const now = new Date();
-    const call = await CallModel.create({ _id: callId, callerId: objectId(context.userId), calleeId: objectId(input.calleeId), conversationId: conversation?._id ?? null, type: input.type, status: "ringing", initiatedAt: now, answeredAt: null, endedAt: null, durationSeconds: null, endedBy: null, endReason: null, callerSessionId: context.sessionId, acceptedBySessionId: null });
+    const call = await CallModel.create({ _id: callId, callerId: objectId(context.userId), calleeId: objectId(input.calleeId), conversationId: conversation?._id ?? null, type: input.type, status: "ringing", initiatedAt: now, answeredAt: null, endedAt: null, durationSeconds: null, endedBy: null, endReason: null, callerSessionId: context.sessionId, acceptedBySessionId: null, callChatMessageCount: 0 });
     return { call, caller, changed: true };
   } catch (caught) {
     await Promise.all([releaseActiveCallKey(context.userId, callId.toString()), releaseActiveCallKey(input.calleeId, callId.toString())]);
@@ -123,7 +174,10 @@ export async function acceptCall(context: AuthContext, callId: string): Promise<
 export async function declineCall(context: AuthContext, callId: string): Promise<CallActionResult> {
   const call = await getOwnedCall(context, callId);
   if (call.calleeId.toString() !== context.userId) throw callForbidden();
-  if (call.status === "declined") return { call, changed: false };
+  if (terminalCallStatuses.includes(call.status)) {
+    await releaseActiveCallKeys(call);
+    return { call, changed: false };
+  }
   const result = await saveTransition(call, "ringing", { status: "declined", endedAt: new Date(), endReason: "declined", durationSeconds: 0 });
   await releaseActiveCallKeys(result.call);
   return result;
@@ -132,7 +186,10 @@ export async function declineCall(context: AuthContext, callId: string): Promise
 export async function cancelCall(context: AuthContext, callId: string): Promise<CallActionResult> {
   const call = await getOwnedCall(context, callId);
   if (call.callerId.toString() !== context.userId) throw callForbidden();
-  if (call.status === "cancelled") return { call, changed: false };
+  if (terminalCallStatuses.includes(call.status)) {
+    await releaseActiveCallKeys(call);
+    return { call, changed: false };
+  }
   const result = await saveTransition(call, "ringing", { status: "cancelled", endedAt: new Date(), endReason: "cancelled", durationSeconds: 0 });
   await releaseActiveCallKeys(result.call);
   return result;
@@ -140,7 +197,23 @@ export async function cancelCall(context: AuthContext, callId: string): Promise<
 
 export async function endCall(context: AuthContext, callId: string): Promise<CallActionResult> {
   const call = await getOwnedCall(context, callId);
-  if (["ended", "failed", "declined", "cancelled", "missed"].includes(call.status)) return { call, changed: false };
+  if (terminalCallStatuses.includes(call.status)) {
+    await releaseActiveCallKeys(call);
+    return { call, changed: false };
+  }
+  if (call.status === "ringing") {
+    const endedAt = new Date();
+    const callerEnded = call.callerId.toString() === context.userId;
+    const result = await saveTransition(call, "ringing", {
+      status: callerEnded ? "cancelled" : "declined",
+      endedAt,
+      endedBy: objectId(context.userId),
+      endReason: callerEnded ? "cancelled" : "declined",
+      durationSeconds: 0,
+    });
+    await releaseActiveCallKeys(result.call);
+    return result;
+  }
   if (call.status !== "accepted") throw invalidTransition();
   const endedAt = new Date();
   setEndedFields(call, endedAt, objectId(context.userId), "local-ended");
@@ -151,13 +224,30 @@ export async function endCall(context: AuthContext, callId: string): Promise<Cal
 
 export async function failCall(context: AuthContext, callId: string): Promise<CallActionResult> {
   const call = await getOwnedCall(context, callId);
-  if (call.status === "failed") return { call, changed: false };
+  if (terminalCallStatuses.includes(call.status)) {
+    await releaseActiveCallKeys(call);
+    return { call, changed: false };
+  }
   if (call.status !== "accepted") throw invalidTransition();
   const endedAt = new Date();
   setEndedFields(call, endedAt, objectId(context.userId), "connection-failed");
   const result = await saveTransition(call, "accepted", { status: "failed", endedAt, endedBy: objectId(context.userId), endReason: "connection-failed", durationSeconds: call.durationSeconds });
   await releaseActiveCallKeys(result.call);
   return result;
+}
+
+export async function changeCallType(context: AuthContext, callId: string, type: CallDocument["type"]): Promise<CallActionResult> {
+  const call = await getOwnedCall(context, callId);
+  if (call.status !== "accepted") throw signalingUnavailable();
+  if (call.type === type) return { call, changed: false };
+  await assertUsersCanInteract(call.callerId.toString(), call.calleeId.toString());
+  const updated = await CallModel.findOneAndUpdate(
+    { _id: call._id, status: "accepted" },
+    { $set: { type } },
+    { returnDocument: "after" },
+  ).exec();
+  if (updated === null) throw invalidTransition();
+  return { call: updated, changed: true };
 }
 
 export async function markCallMissed(callId: string): Promise<CallDocument | null> {
@@ -218,6 +308,18 @@ export async function getCallDetails(context: AuthContext, callId: string): Prom
   const user = await getUserById(otherId);
   if (user === null) throw callNotFound();
   return toCallDto(call, context.userId, user);
+}
+
+export async function recordCallChatActivity(context: AuthContext, callId: string): Promise<number> {
+  const call = await CallModel.findOne({
+    _id: objectId(callId),
+    status: "accepted",
+    $or: [{ callerId: objectId(context.userId) }, { calleeId: objectId(context.userId) }],
+  }).exec();
+  if (call === null) throw error("CALL_NOT_ACTIVE", "The call is no longer active.", 409);
+  call.callChatMessageCount = (call.callChatMessageCount ?? 0) + 1;
+  await call.save();
+  return call.callChatMessageCount;
 }
 
 export async function initializeCallModels(): Promise<void> {

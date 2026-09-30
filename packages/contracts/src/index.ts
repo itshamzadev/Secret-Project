@@ -666,6 +666,7 @@ export interface CallDto {
   endedAt: string | null;
   durationSeconds: number | null;
   endReason: CallEndReason | null;
+  callChatMessageCount: number;
 }
 
 export interface CallHistoryData {
