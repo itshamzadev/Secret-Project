@@ -124,6 +124,24 @@ export const adminApi = {
     );
   },
 
+  async userAvatar(token: string, userId: string, signal?: AbortSignal): Promise<Blob> {
+    const requestInit: RequestInit = {
+      headers: {
+        Accept: "image/*",
+        Authorization: `Bearer ${token}`,
+      },
+    };
+    if (signal !== undefined) requestInit.signal = signal;
+    const response = await fetch(
+      buildAdminApiUrl(`/admin/users/${userId}/avatar`),
+      requestInit,
+    );
+    if (!response.ok) {
+      throw new AdminApiError("The user avatar is unavailable.", "AVATAR_NOT_FOUND", response.status);
+    }
+    return response.blob();
+  },
+
   setUserStatus(
     token: string,
     userId: string,

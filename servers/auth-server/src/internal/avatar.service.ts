@@ -70,3 +70,13 @@ export async function streamAvatar(config: AuthServerConfig, userId: string, vie
   response.setHeader("Cache-Control", "private, max-age=300");
   if (media.body !== null) await pipeline(Readable.fromWeb(media.body as ReadableStream), response);
 }
+
+export async function streamAdminAvatar(config: AuthServerConfig, userId: string, response: ExpressResponse): Promise<void> {
+  const user = await UserModel.findById(userId).select({ avatarStorageKey: 1, avatarMimeType: 1 }).exec();
+  if (user === null || user.avatarStorageKey === null) throw new AppError({ code: "AVATAR_NOT_FOUND", message: "The avatar was not found.", statusCode: 404 });
+  const media = await mediaRequest(config, `/internal/media/files/${encodeURIComponent(user.avatarStorageKey)}`, { headers: { "x-media-mime-type": user.avatarMimeType ?? "image/jpeg" } });
+  response.setHeader("Content-Type", user.avatarMimeType ?? "image/jpeg");
+  response.setHeader("Content-Length", media.headers.get("content-length") ?? "0");
+  response.setHeader("Cache-Control", "private, max-age=300");
+  if (media.body !== null) await pipeline(Readable.fromWeb(media.body as ReadableStream), response);
+}

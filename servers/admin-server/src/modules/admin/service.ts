@@ -34,7 +34,7 @@ export async function getAdminById(adminId: string) {
 
 export async function listAdminUsers(config: AdminServerConfig, query: AdminUsersQuery): Promise<AdminUserListResponse> {
   const result = await listUsers(config, query);
-  return { users: result.data.users.map((user) => ({ id: user.id, username: user.username, displayName: user.displayName, email: user.email, phone: user.phone, accountStatus: user.accountStatus, role: user.role, accountType: user.accountType, userTier: user.userTier, badges: user.badges, createdAt: user.createdAt, lastSeenAt: user.lastSeenAt, appVersions: user.appVersions })), nextCursor: result.data.nextCursor };
+  return { users: result.data.users.map((user) => ({ id: user.id, username: user.username, displayName: user.displayName, email: user.email, phone: user.phone, avatarUrl: user.avatarUrl, accountStatus: user.accountStatus, role: user.role, accountType: user.accountType, userTier: user.userTier, badges: user.badges, createdAt: user.createdAt, lastSeenAt: user.lastSeenAt, appVersions: user.appVersions })), nextCursor: result.data.nextCursor };
 }
 
 export async function listAdminGroups(config: AdminServerConfig): Promise<AdminGroupListResponse> {

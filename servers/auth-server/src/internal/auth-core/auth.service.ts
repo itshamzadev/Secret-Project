@@ -92,6 +92,18 @@ async function issueSession(
   const refreshToken = createRefreshToken(sessionId);
   const now = new Date();
   const expiresAt = getRefreshTokenExpiry();
+  const activeDeviceCount = await AuthSessionModel.countDocuments({
+    userId: user._id,
+    revokedAt: null,
+    expiresAt: { $gt: now },
+  });
+  if (activeDeviceCount >= getAuthCoreConfig().maxLinkedDevices) {
+    throw new AppError({
+      code: "MAX_LINKED_DEVICES",
+      message: `This account already has ${getAuthCoreConfig().maxLinkedDevices} linked devices. Unlink one before adding another.`,
+      statusCode: 409,
+    });
+  }
   const session = await AuthSessionModel.create({
     userId: user._id,
     sessionId,

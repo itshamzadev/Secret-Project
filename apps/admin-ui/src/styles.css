@@ -1000,6 +1000,10 @@ tbody tr:last-child td {
   background: #dff3f4;
 }
 
+.user-avatar-image {
+  object-fit: cover;
+}
+
 .user-cell > span:last-child {
   display: grid;
   gap: 3px;
@@ -1110,6 +1114,43 @@ tbody tr:last-child td {
   color: var(--ink);
   font-size: 22px;
   letter-spacing: -0.04em;
+}
+
+.security-note {
+  color: #71829a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.password-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.password-input-wrap input {
+  padding-right: 42px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #71829a;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  color: #2163de;
+  background: #eef5ff;
 }
 
 .dialog-heading p {

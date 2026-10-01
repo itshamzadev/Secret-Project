@@ -5,6 +5,7 @@ export interface AuthCoreConfig {
   jwtAudience: string;
   accessTokenTtlSeconds: number;
   refreshTokenTtlDays: number;
+  maxLinkedDevices: number;
   onSessionRevoked?: (sessionId: string) => void | Promise<void>;
 }
 

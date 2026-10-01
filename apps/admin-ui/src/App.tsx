@@ -32,6 +32,8 @@ type IconName =
   | "check"
   | "chevron"
   | "grid"
+  | "eye"
+  | "eyeOff"
   | "flag"
   | "logout"
   | "menu"
@@ -44,6 +46,8 @@ const iconPaths: Record<IconName, string> = {
   arrow: "M5 12h14m-6-6 6 6-6 6",
   check: "m5 12 4 4L19 6",
   chevron: "m9 18 6-6-6-6",
+  eye: "M2.5 12s3.5-5 9.5-5 9.5 5 9.5 5-3.5 5-9.5 5-9.5-5-9.5-5Zm9.5 2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+  eyeOff: "m3 3 18 18M10.6 5.2A10.7 10.7 0 0 1 12 5c6 0 9.5 5 9.5 5a16.8 16.8 0 0 1-3.2 3.4M6.2 6.2C3.8 7.6 2.5 10 2.5 10s3.5 5 9.5 5c1.1 0 2.1-.2 3-.5",
   grid: "M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z",
   flag: "M5 21V4m0 0c4-3 7 3 14 0v9c-7 3-10-3-14 0",
   logout:
@@ -834,6 +838,7 @@ function UsersPage({ token }: { token: string }) {
                     }
                     onTier={(tier) => void setUserTier(user, tier)}
                     onBadges={(badges) => void setUserBadges(user, badges)}
+                    token={token}
                     user={user}
                   />
                 ))
@@ -870,9 +875,55 @@ function UsersPage({ token }: { token: string }) {
   );
 }
 
+function UserAvatar({
+  token,
+  user,
+}: {
+  token: string;
+  user: AdminUserListItemDto;
+}) {
+  const [source, setSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user.avatarUrl === null) {
+      setSource(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void adminApi
+      .userAvatar(token, user.id, controller.signal)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSource(null);
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+    };
+  }, [token, user.avatarUrl, user.id]);
+
+  if (source !== null) {
+    return (
+      <img
+        alt={`${user.displayName} profile`}
+        className="user-avatar user-avatar-image"
+        src={source}
+      />
+    );
+  }
+  return <span className="user-avatar">{initials(user.displayName)}</span>;
+}
+
 function UserRow({
   user,
   busy,
+  token,
   onPassword,
   onStatus,
   onTier,
@@ -881,6 +932,7 @@ function UserRow({
 }: {
   user: AdminUserListItemDto;
   busy: boolean;
+  token: string;
   onPassword: () => void;
   onStatus: () => void;
   onTier: (tier: AdminUserListItemDto["userTier"]) => void;
@@ -891,7 +943,7 @@ function UserRow({
     <tr>
       <td>
         <div className="user-cell">
-          <span className="user-avatar">{initials(user.displayName)}</span>
+          <UserAvatar token={token} user={user} />
           <span>
             <strong>{user.displayName}</strong>
             <small>@{user.username}</small>
@@ -941,7 +993,7 @@ function UserRow({
             onClick={onPassword}
             type="button"
           >
-            Password
+            Change password
           </button>
           <button
             className="table-action"
@@ -980,6 +1032,8 @@ function PasswordChangeDialog({
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1017,6 +1071,10 @@ function PasswordChangeDialog({
             <p>
               @{user.username} will need to sign in again on active devices.
             </p>
+            <p className="security-note">
+              The current password cannot be viewed. It is stored as a one-way
+              Argon2id hash; set a new password here instead.
+            </p>
           </div>
           <button
             aria-label="Close"
@@ -1030,25 +1088,45 @@ function PasswordChangeDialog({
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <label>
             <span>New password</span>
-            <input
-              autoComplete="new-password"
-              minLength={8}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
+            <span className="password-input-wrap">
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type={showPassword ? "text" : "password"}
+                value={password}
+              />
+              <button
+                aria-label={showPassword ? "Hide new password" : "Show new password"}
+                className="password-toggle"
+                onClick={() => setShowPassword((visible) => !visible)}
+                type="button"
+              >
+                <Icon name={showPassword ? "eyeOff" : "eye"} size={17} />
+              </button>
+            </span>
           </label>
           <label>
             <span>Confirm password</span>
-            <input
-              autoComplete="new-password"
-              minLength={8}
-              onChange={(event) => setConfirmation(event.target.value)}
-              required
-              type="password"
-              value={confirmation}
-            />
+            <span className="password-input-wrap">
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                onChange={(event) => setConfirmation(event.target.value)}
+                required
+                type={showConfirmation ? "text" : "password"}
+                value={confirmation}
+              />
+              <button
+                aria-label={showConfirmation ? "Hide password confirmation" : "Show password confirmation"}
+                className="password-toggle"
+                onClick={() => setShowConfirmation((visible) => !visible)}
+                type="button"
+              >
+                <Icon name={showConfirmation ? "eyeOff" : "eye"} size={17} />
+              </button>
+            </span>
           </label>
           {error !== null ? <p className="form-error">{error}</p> : null}
           <div className="dialog-actions">

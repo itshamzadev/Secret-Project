@@ -1,5 +1,11 @@
 import type { AdminServerConfig } from "../config/env.js";
 import { callInternal } from "./http.js";
+import type { Response as ExpressResponse } from "express";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream } from "node:stream/web";
+import { AppError } from "../core/errors.js";
+import { issueServiceToken } from "../internal/service-auth.js";
 
 export interface AuthAdminUser {
   id: string;
@@ -99,6 +105,50 @@ export async function updateUserPassword(
     `/internal/admin/users/${userId}/password`,
     { method: "PATCH", body: JSON.stringify({ password }) },
   );
+}
+
+export async function streamUserAvatar(
+  config: AdminServerConfig,
+  userId: string,
+  response: ExpressResponse,
+): Promise<void> {
+  const token = await issueServiceToken(config);
+  let upstream: Response;
+  try {
+    upstream = await fetch(
+      `${config.AUTH_SERVICE_URL}/internal/admin/users/${encodeURIComponent(userId)}/avatar`,
+      {
+        headers: {
+          Accept: "image/*",
+          "x-internal-service-token": token,
+        },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+  } catch {
+    throw new AppError({
+      code: "ADMIN_DEPENDENCY_UNAVAILABLE",
+      message: "An administrative dependency is unavailable.",
+      statusCode: 503,
+    });
+  }
+
+  if (!upstream.ok) {
+    const body = (await upstream.json().catch(() => undefined)) as
+      | { error?: { code?: unknown; message?: unknown } }
+      | undefined;
+    const code = typeof body?.error?.code === "string" ? body.error.code : "AVATAR_NOT_FOUND";
+    const message = typeof body?.error?.message === "string" ? body.error.message : "The avatar was not found.";
+    throw new AppError({ code, message, statusCode: upstream.status === 404 ? 404 : 503 });
+  }
+
+  response.setHeader("Content-Type", upstream.headers.get("content-type") ?? "image/jpeg");
+  const contentLength = upstream.headers.get("content-length");
+  if (contentLength !== null) response.setHeader("Content-Length", contentLength);
+  response.setHeader("Cache-Control", "private, max-age=300");
+  if (upstream.body !== null) {
+    await pipeline(Readable.fromWeb(upstream.body as ReadableStream), response);
+  }
 }
 export async function updateUserStatus(
   config: AdminServerConfig,
